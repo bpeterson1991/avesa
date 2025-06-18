@@ -51,7 +51,7 @@ class DataPipelineStack(Stack):
         self.lambda_role = self._create_lambda_role()
 
         # Create Lambda functions
-        self.raw_ingestion_lambda = self._create_raw_ingestion_lambda(
+        self.connectwise_lambda = self._create_connectwise_lambda(
             memory=lambda_memory,
             timeout=lambda_timeout
         )
@@ -193,15 +193,15 @@ class DataPipelineStack(Stack):
         role.attach_inline_policy(policy)
         return role
 
-    def _create_raw_ingestion_lambda(self, memory: int, timeout: int) -> _lambda.Function:
-        """Create Lambda function for raw data ingestion (supports multiple integration services)."""
+    def _create_connectwise_lambda(self, memory: int, timeout: int) -> _lambda.Function:
+        """Create Lambda function for ConnectWise data ingestion."""
         function = _lambda.Function(
             self,
-            "RawIngestionLambda",
-            function_name=f"avesa-raw-ingestion-{self.environment}",
+            "ConnectWiseLambda",
+            function_name=f"avesa-connectwise-ingestion-{self.environment}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="lambda_function.lambda_handler",
-            code=_lambda.Code.from_asset("../src/raw_ingestion"),
+            code=_lambda.Code.from_asset("../src/integrations/connectwise"),
             role=self.lambda_role,
             memory_size=memory,
             timeout=Duration.seconds(timeout),
@@ -210,7 +210,7 @@ class DataPipelineStack(Stack):
                 "TENANT_SERVICES_TABLE": self.tenant_services_table.table_name,
                 "LAST_UPDATED_TABLE": self.last_updated_table.table_name,
                 "ENVIRONMENT": self.environment,
-                "SERVICE_NAME": "connectwise"  # This can be parameterized for different services
+                "SERVICE_NAME": "connectwise"
             },
             log_retention=logs.RetentionDays.ONE_MONTH
         )
@@ -239,15 +239,15 @@ class DataPipelineStack(Stack):
 
     def _create_scheduled_rules(self) -> None:
         """Create EventBridge rules for scheduled execution."""
-        # Raw ingestion - every 15 minutes
-        raw_ingestion_rule = events.Rule(
+        # ConnectWise ingestion - every 15 minutes
+        connectwise_rule = events.Rule(
             self,
-            "RawIngestionSchedule",
+            "ConnectWiseIngestionSchedule",
             schedule=events.Schedule.rate(Duration.minutes(15)),
-            description="Trigger raw data ingestion every 15 minutes"
+            description="Trigger ConnectWise data ingestion every 15 minutes"
         )
-        raw_ingestion_rule.add_target(
-            targets.LambdaFunction(self.raw_ingestion_lambda)
+        connectwise_rule.add_target(
+            targets.LambdaFunction(self.connectwise_lambda)
         )
 
         # Canonical transformation - every 30 minutes (offset by 10 minutes)

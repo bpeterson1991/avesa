@@ -6,19 +6,23 @@ A multi-tenant data ingestion and transformation pipeline supporting 30+ integra
 
 This pipeline consists of two main components:
 
-1. **Raw Data Ingestion Lambda**: Multi-service lambda functions that pull data from various integration service APIs (ConnectWise, ServiceNow, etc.), flatten JSON, and store as Parquet in S3
-2. **Canonical SCD Type 2 Transformation Lambda**: Transforms raw data using per-canonical-table mapping files with historical tracking
+1. **Integration-Specific Lambda Functions**: Each integration service has its own dedicated lambda function that handles authentication, API calls, and data extraction for that specific service
+2. **Canonical SCD Type 2 Transformation Lambda**: Transforms raw data from all integration services using per-canonical-table mapping files with historical tracking
 
 ## Integration Services
 
-The pipeline is designed to support multiple integration services:
-- **ConnectWise** (PSA/RMM platform)
-- **ServiceNow** (ITSM platform)
-- **Salesforce** (CRM platform)
-- **Microsoft 365** (Productivity suite)
+The pipeline is designed to support multiple integration services, each with its own lambda function:
+- **ConnectWise** (PSA/RMM platform) - `avesa-connectwise-ingestion`
+- **ServiceNow** (ITSM platform) - `avesa-servicenow-ingestion`
+- **Salesforce** (CRM platform) - `avesa-salesforce-ingestion`
+- **Microsoft 365** (Productivity suite) - `avesa-microsoft365-ingestion`
 - **And 25+ more services...**
 
-Each integration service has its own lambda function that handles 10-20 different endpoints/tables.
+Each integration service lambda function handles:
+- Service-specific authentication (OAuth, API keys, etc.)
+- Service-specific API structures and rate limiting
+- 10-20 different endpoints/tables per service
+- Service-specific error handling and retry logic
 
 ## Project Structure
 
@@ -29,7 +33,10 @@ avesa/
 │   ├── stacks/             # CDK stack definitions
 │   └── constructs/         # Reusable CDK constructs
 ├── src/                    # Lambda function source code
-│   ├── raw_ingestion/      # Raw data ingestion lambda (per service)
+│   ├── integrations/       # Integration-specific lambda functions
+│   │   ├── connectwise/    # ConnectWise-specific ingestion lambda
+│   │   ├── servicenow/     # ServiceNow-specific ingestion lambda (future)
+│   │   └── salesforce/     # Salesforce-specific ingestion lambda (future)
 │   ├── canonical_transform/ # SCD2 transformation lambda
 │   └── shared/             # Shared utilities and libraries
 ├── mappings/               # JSON mapping files (one per canonical table)
@@ -46,7 +53,9 @@ avesa/
 ## Data Flow
 
 ```
-Integration APIs → Service-Specific Ingestion Lambdas → S3 (Raw Parquet) → Canonical Transform Lambda → S3 (Canonical Parquet) → Data Warehouse
+ConnectWise API → ConnectWise Lambda → S3 (Raw Parquet)
+ServiceNow API → ServiceNow Lambda → S3 (Raw Parquet)     → Canonical Transform Lambda → S3 (Canonical Parquet) → Data Warehouse
+Salesforce API → Salesforce Lambda → S3 (Raw Parquet)
 ```
 
 ## Storage Structure

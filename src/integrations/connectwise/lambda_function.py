@@ -1,11 +1,17 @@
 """
-Raw Data Ingestion Lambda Function
+ConnectWise Integration Lambda Function
 
-This function pulls data from various integration service APIs per tenant (ConnectWise, ServiceNow, etc.),
-flattens the JSON, filters out already-seen records based on `id`, and writes to S3 in Parquet format.
+This function pulls data from ConnectWise REST API per tenant, flattens the JSON,
+filters out already-seen records based on `id`, and writes to S3 in Parquet format.
 
-Each integration service has its own lambda function that handles multiple endpoints/tables.
-This is a multi-tenant system where multiple customer organizations (tenants) share the same lambda functions.
+This is a ConnectWise-specific lambda function that handles multiple ConnectWise endpoints/tables.
+This is a multi-tenant system where multiple customer organizations (tenants) share this lambda function.
+
+ConnectWise-specific features:
+- Uses ConnectWise API authentication (Basic Auth with API keys)
+- Handles ConnectWise-specific field structures and naming conventions
+- Supports ConnectWise pagination and rate limiting
+- Processes ConnectWise endpoints: service/tickets, time/entries, company/companies, company/contacts, etc.
 """
 
 import json
