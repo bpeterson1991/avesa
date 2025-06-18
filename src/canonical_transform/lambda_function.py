@@ -177,19 +177,44 @@ def get_tenant_configurations(config: Config, target_tenant: Optional[str] = Non
 
 
 def get_canonical_mappings(config: Config, tenant_id: str) -> Dict[str, Dict[str, Any]]:
-    """Get canonical table mappings from S3."""
+    """Get canonical table mappings from S3 (one file per canonical table)."""
     try:
-        # Try to get tenant-specific mappings first
-        mapping_key = f"{tenant_id}/mappings/canonical_mappings.json"
+        mappings = {}
         
+        # List all mapping files in the mappings directory
         try:
-            response = s3.get_object(Bucket=config.bucket_name, Key=mapping_key)
-            mappings = json.loads(response['Body'].read().decode('utf-8'))
-        except s3.exceptions.NoSuchKey:
-            # Fall back to default mappings
-            mapping_key = "mappings/canonical_mappings.json"
-            response = s3.get_object(Bucket=config.bucket_name, Key=mapping_key)
-            mappings = json.loads(response['Body'].read().decode('utf-8'))
+            # Try tenant-specific mappings first
+            mapping_prefix = f"{tenant_id}/mappings/"
+            response = s3.list_objects_v2(Bucket=config.bucket_name, Prefix=mapping_prefix)
+            
+            if 'Contents' not in response:
+                # Fall back to default mappings
+                mapping_prefix = "mappings/"
+                response = s3.list_objects_v2(Bucket=config.bucket_name, Prefix=mapping_prefix)
+            
+            if 'Contents' in response:
+                for obj in response['Contents']:
+                    if obj['Key'].endswith('.json'):
+                        # Extract canonical table name from filename
+                        filename = obj['Key'].split('/')[-1]
+                        canonical_table = filename.replace('.json', '')
+                        
+                        # Read the mapping file
+                        mapping_response = s3.get_object(Bucket=config.bucket_name, Key=obj['Key'])
+                        mapping_data = json.loads(mapping_response['Body'].read().decode('utf-8'))
+                        mappings[canonical_table] = mapping_data
+        
+        except Exception:
+            # If S3 operations fail, fall back to local mappings directory
+            import os
+            mappings_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'mappings')
+            if os.path.exists(mappings_dir):
+                for filename in os.listdir(mappings_dir):
+                    if filename.endswith('.json'):
+                        canonical_table = filename.replace('.json', '')
+                        filepath = os.path.join(mappings_dir, filename)
+                        with open(filepath, 'r') as f:
+                            mappings[canonical_table] = json.load(f)
         
         return mappings
         

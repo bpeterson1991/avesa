@@ -1,6 +1,9 @@
 """
 Main data pipeline stack containing Lambda functions, DynamoDB tables,
-S3 bucket, and IAM roles for the ConnectWise data pipeline.
+S3 bucket, and IAM roles for the AVESA multi-tenant data pipeline.
+
+Supports 30+ integration services (ConnectWise, ServiceNow, Salesforce, etc.)
+with multi-tenant architecture where each service has dedicated lambda functions.
 """
 
 from aws_cdk import (
@@ -20,7 +23,7 @@ from typing import Dict, Any
 
 
 class DataPipelineStack(Stack):
-    """Main stack for the ConnectWise data pipeline infrastructure."""
+    """Main stack for the AVESA multi-tenant data pipeline infrastructure."""
 
     def __init__(
         self,
@@ -191,11 +194,11 @@ class DataPipelineStack(Stack):
         return role
 
     def _create_raw_ingestion_lambda(self, memory: int, timeout: int) -> _lambda.Function:
-        """Create Lambda function for raw data ingestion."""
+        """Create Lambda function for raw data ingestion (supports multiple integration services)."""
         function = _lambda.Function(
             self,
             "RawIngestionLambda",
-            function_name=f"connectwise-raw-ingestion-{self.environment}",
+            function_name=f"avesa-raw-ingestion-{self.environment}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="lambda_function.lambda_handler",
             code=_lambda.Code.from_asset("../src/raw_ingestion"),
@@ -206,18 +209,19 @@ class DataPipelineStack(Stack):
                 "BUCKET_NAME": self.data_bucket.bucket_name,
                 "TENANT_SERVICES_TABLE": self.tenant_services_table.table_name,
                 "LAST_UPDATED_TABLE": self.last_updated_table.table_name,
-                "ENVIRONMENT": self.environment
+                "ENVIRONMENT": self.environment,
+                "SERVICE_NAME": "connectwise"  # This can be parameterized for different services
             },
             log_retention=logs.RetentionDays.ONE_MONTH
         )
         return function
 
     def _create_canonical_transform_lambda(self, memory: int, timeout: int) -> _lambda.Function:
-        """Create Lambda function for canonical transformation."""
+        """Create Lambda function for canonical transformation (processes all integration services)."""
         function = _lambda.Function(
             self,
             "CanonicalTransformLambda",
-            function_name=f"connectwise-canonical-transform-{self.environment}",
+            function_name=f"avesa-canonical-transform-{self.environment}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="lambda_function.lambda_handler",
             code=_lambda.Code.from_asset("../src/canonical_transform"),

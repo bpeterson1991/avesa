@@ -1,0 +1,62 @@
+{
+  "connectwise": {
+    "service/tickets": {
+      "id": "id",
+      "ticket_number": "id",
+      "summary": "summary",
+      "description": "initialDescription",
+      "status": "status__name",
+      "priority": "priority__name",
+      "severity": "severity",
+      "impact": "impact",
+      "urgency": "urgency",
+      "company_id": "company__id",
+      "company_name": "company__name",
+      "contact_id": "contact__id",
+      "contact_name": "contact__name",
+      "board_id": "board__id",
+      "board_name": "board__name",
+      "type_id": "type__id",
+      "type_name": "type__name",
+      "subtype_id": "subType__id",
+      "subtype_name": "subType__name",
+      "item_id": "item__id",
+      "item_name": "item__name",
+      "team_id": "team__id",
+      "team_name": "team__name",
+      "owner_id": "owner__id",
+      "owner_name": "owner__name",
+      "created_by": "enteredBy",
+      "created_date": "dateEntered",
+      "required_date": "requiredDate",
+      "budget_hours": "budgetHours",
+      "actual_hours": "actualHours",
+      "approved": "approved",
+      "closed_date": "closedDate",
+      "closed_by": "closedBy",
+      "last_updated": "_info__lastUpdated",
+      "last_updated_by": "_info__updatedBy"
+    }
+  },
+  "servicenow": {
+    "incident": {
+      "id": "sys_id",
+      "ticket_number": "number",
+      "summary": "short_description",
+      "description": "description",
+      "status": "state",
+      "priority": "priority",
+      "severity": "severity",
+      "impact": "impact",
+      "urgency": "urgency",
+      "company_id": "company.sys_id",
+      "company_name": "company.name",
+      "contact_id": "caller_id.sys_id",
+      "contact_name": "caller_id.name",
+      "created_by": "sys_created_by",
+      "created_date": "sys_created_on",
+      "last_updated": "sys_updated_on",
+      "last_updated_by": "sys_updated_by"
+    }
+  }
+}
