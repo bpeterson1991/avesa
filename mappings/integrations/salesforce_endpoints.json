@@ -1,0 +1,94 @@
+{
+  "service_name": "salesforce",
+  "api_version": "v58.0",
+  "endpoints": {
+    "Account": {
+      "enabled": true,
+      "canonical_table": "companies",
+      "sync_frequency": "30min",
+      "page_size": 2000,
+      "order_by": "LastModifiedDate ASC",
+      "incremental_field": "LastModifiedDate",
+      "description": "Customer accounts and organizations"
+    },
+    "Contact": {
+      "enabled": true,
+      "canonical_table": "contacts",
+      "sync_frequency": "30min",
+      "page_size": 2000,
+      "order_by": "LastModifiedDate ASC",
+      "incremental_field": "LastModifiedDate",
+      "description": "Contact records and users"
+    },
+    "Case": {
+      "enabled": true,
+      "canonical_table": "tickets",
+      "sync_frequency": "15min",
+      "page_size": 2000,
+      "order_by": "LastModifiedDate ASC",
+      "incremental_field": "LastModifiedDate",
+      "description": "Support cases and tickets"
+    },
+    "Opportunity": {
+      "enabled": false,
+      "canonical_table": "opportunities",
+      "sync_frequency": "30min",
+      "page_size": 2000,
+      "order_by": "LastModifiedDate ASC",
+      "incremental_field": "LastModifiedDate",
+      "description": "Sales opportunities"
+    },
+    "Lead": {
+      "enabled": false,
+      "canonical_table": "leads",
+      "sync_frequency": "30min",
+      "page_size": 2000,
+      "order_by": "LastModifiedDate ASC",
+      "incremental_field": "LastModifiedDate",
+      "description": "Sales leads"
+    },
+    "Task": {
+      "enabled": false,
+      "canonical_table": "tasks",
+      "sync_frequency": "30min",
+      "page_size": 2000,
+      "order_by": "LastModifiedDate ASC",
+      "incremental_field": "LastModifiedDate",
+      "description": "Tasks and activities"
+    },
+    "Event": {
+      "enabled": false,
+      "canonical_table": "events",
+      "sync_frequency": "30min",
+      "page_size": 2000,
+      "order_by": "LastModifiedDate ASC",
+      "incremental_field": "LastModifiedDate",
+      "description": "Calendar events and meetings"
+    },
+    "User": {
+      "enabled": false,
+      "canonical_table": "users",
+      "sync_frequency": "60min",
+      "page_size": 2000,
+      "order_by": "LastModifiedDate ASC",
+      "incremental_field": "LastModifiedDate",
+      "description": "Salesforce users"
+    }
+  },
+  "authentication": {
+    "type": "oauth2",
+    "grant_type": "client_credentials",
+    "scope": "api",
+    "token_endpoint": "/services/oauth2/token"
+  },
+  "rate_limiting": {
+    "requests_per_minute": 1000,
+    "burst_limit": 100,
+    "retry_strategy": "exponential_backoff"
+  },
+  "error_handling": {
+    "retry_attempts": 3,
+    "retry_delay_seconds": 5,
+    "timeout_seconds": 30
+  }
+}

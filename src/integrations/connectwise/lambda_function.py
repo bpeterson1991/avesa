@@ -154,7 +154,7 @@ def get_tenant_configurations(config: Config, target_tenant: Optional[str] = Non
                 'connectwise_url': item['connectwise_url']['S'],
                 'secret_name': item['secret_name']['S'],
                 'enabled': item.get('enabled', {'BOOL': True})['BOOL'],
-                'tables': [t['S'] for t in item.get('tables', {'L': []})['L']],
+                'tables': get_enabled_endpoints_for_tenant(item['tenant_id']['S']),
                 'custom_config': json.loads(item.get('custom_config', {'S': '{}'})['S'])
             }
             return [validate_tenant_config(tenant_data)]
@@ -173,7 +173,7 @@ def get_tenant_configurations(config: Config, target_tenant: Optional[str] = Non
                     'connectwise_url': item['connectwise_url']['S'],
                     'secret_name': item['secret_name']['S'],
                     'enabled': item.get('enabled', {'BOOL': True})['BOOL'],
-                    'tables': [t['S'] for t in item.get('tables', {'L': []})['L']],
+                    'tables': get_enabled_endpoints_for_tenant(item['tenant_id']['S']),
                     'custom_config': json.loads(item.get('custom_config', {'S': '{}'})['S'])
                 }
                 tenants.append(validate_tenant_config(tenant_data))
@@ -182,6 +182,33 @@ def get_tenant_configurations(config: Config, target_tenant: Optional[str] = Non
             
     except Exception as e:
         raise Exception(f"Failed to get tenant configurations: {str(e)}")
+
+
+def get_enabled_endpoints_for_tenant(tenant_id: str) -> List[str]:
+    """Get enabled endpoints for ConnectWise from endpoint configuration."""
+    try:
+        # Try to get tenant-specific endpoint config first
+        try:
+            endpoint_key = f"{tenant_id}/mappings/integrations/connectwise_endpoints.json"
+            response = s3.get_object(Bucket=os.environ['BUCKET_NAME'], Key=endpoint_key)
+            endpoint_config = json.loads(response['Body'].read().decode('utf-8'))
+        except:
+            # Fall back to default endpoint config
+            endpoint_key = "mappings/integrations/connectwise_endpoints.json"
+            response = s3.get_object(Bucket=os.environ['BUCKET_NAME'], Key=endpoint_key)
+            endpoint_config = json.loads(response['Body'].read().decode('utf-8'))
+        
+        # Return only enabled endpoints
+        enabled_endpoints = []
+        for endpoint, config in endpoint_config.get('endpoints', {}).items():
+            if config.get('enabled', False):
+                enabled_endpoints.append(endpoint)
+        
+        return enabled_endpoints
+        
+    except Exception as e:
+        # Fall back to default endpoints if config can't be read
+        return ['service/tickets', 'time/entries', 'company/companies', 'company/contacts']
 
 
 def get_connectwise_credentials(secret_name: str) -> ConnectWiseCredentials:

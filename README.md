@@ -39,11 +39,15 @@ avesa/
 │   │   └── salesforce/     # Salesforce-specific ingestion lambda (future)
 │   ├── canonical_transform/ # SCD2 transformation lambda
 │   └── shared/             # Shared utilities and libraries
-├── mappings/               # JSON mapping files (one per canonical table)
-│   ├── tickets.json        # Mapping for canonical tickets table
-│   ├── time_entries.json   # Mapping for canonical time entries table
-│   ├── companies.json      # Mapping for canonical companies table
-│   └── contacts.json       # Mapping for canonical contacts table
+├── mappings/               # JSON mapping and configuration files
+│   ├── integrations/       # Integration service endpoint configurations
+│   │   ├── connectwise_endpoints.json    # ConnectWise endpoints and settings
+│   │   ├── servicenow_endpoints.json     # ServiceNow endpoints and settings
+│   │   └── salesforce_endpoints.json     # Salesforce endpoints and settings
+│   ├── tickets.json        # Canonical tickets table mapping
+│   ├── time_entries.json   # Canonical time entries table mapping
+│   ├── companies.json      # Canonical companies table mapping
+│   └── contacts.json       # Canonical contacts table mapping
 ├── tests/                  # Unit and integration tests
 ├── scripts/                # Deployment and utility scripts
 ├── docs/                   # Documentation
