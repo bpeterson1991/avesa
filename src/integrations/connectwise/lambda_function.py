@@ -149,17 +149,25 @@ def get_tenant_configurations(config: Config, target_tenant: Optional[str] = Non
                 raise ValueError(f"Tenant {target_tenant} not found")
             
             item = response['Item']
+            
+            # Check if ConnectWise service is configured for this tenant
+            services = item.get('services', {}).get('M', {})
+            connectwise_service = services.get('connectwise', {}).get('M', {})
+            
+            if not connectwise_service or not connectwise_service.get('enabled', {}).get('S') == 'True':
+                return []  # ConnectWise not enabled for this tenant
+            
             tenant_data = {
                 'tenant_id': item['tenant_id']['S'],
-                'connectwise_url': item['connectwise_url']['S'],
-                'secret_name': item['secret_name']['S'],
+                'connectwise_url': connectwise_service.get('api_url', {}).get('S', ''),
+                'secret_name': f"tenant/{item['tenant_id']['S']}/{config.environment}",
                 'enabled': item.get('enabled', {'BOOL': True})['BOOL'],
-                'tables': get_enabled_endpoints_for_tenant(item['tenant_id']['S']),
-                'custom_config': json.loads(item.get('custom_config', {'S': '{}'})['S'])
+                'tables': [table['S'] for table in connectwise_service.get('tables', {}).get('L', [])],
+                'custom_config': {}
             }
             return [validate_tenant_config(tenant_data)]
         else:
-            # Get all enabled tenants
+            # Get all enabled tenants with ConnectWise service
             response = dynamodb.scan(
                 TableName=config.tenant_services_table,
                 FilterExpression='enabled = :enabled',
@@ -168,15 +176,20 @@ def get_tenant_configurations(config: Config, target_tenant: Optional[str] = Non
             
             tenants = []
             for item in response['Items']:
-                tenant_data = {
-                    'tenant_id': item['tenant_id']['S'],
-                    'connectwise_url': item['connectwise_url']['S'],
-                    'secret_name': item['secret_name']['S'],
-                    'enabled': item.get('enabled', {'BOOL': True})['BOOL'],
-                    'tables': get_enabled_endpoints_for_tenant(item['tenant_id']['S']),
-                    'custom_config': json.loads(item.get('custom_config', {'S': '{}'})['S'])
-                }
-                tenants.append(validate_tenant_config(tenant_data))
+                # Check if ConnectWise service is configured and enabled
+                services = item.get('services', {}).get('M', {})
+                connectwise_service = services.get('connectwise', {}).get('M', {})
+                
+                if connectwise_service and connectwise_service.get('enabled', {}).get('S') == 'True':
+                    tenant_data = {
+                        'tenant_id': item['tenant_id']['S'],
+                        'connectwise_url': connectwise_service.get('api_url', {}).get('S', ''),
+                        'secret_name': f"tenant/{item['tenant_id']['S']}/{config.environment}",
+                        'enabled': item.get('enabled', {'BOOL': True})['BOOL'],
+                        'tables': [table['S'] for table in connectwise_service.get('tables', {}).get('L', [])],
+                        'custom_config': {}
+                    }
+                    tenants.append(validate_tenant_config(tenant_data))
             
             return tenants
             
@@ -216,9 +229,23 @@ def get_connectwise_credentials(secret_name: str) -> ConnectWiseCredentials:
     try:
         response = secrets.get_secret_value(SecretId=secret_name)
         secret_data = json.loads(response['SecretString'])
-        return ConnectWiseCredentials(**secret_data)
+        
+        # Extract ConnectWise credentials from the multi-service secret
+        connectwise_data = secret_data.get('connectwise')
+        if not connectwise_data:
+            raise ValueError("ConnectWise credentials not found in secret")
+        
+        # Map the new field names to the expected format
+        credentials_data = {
+            'company_id': connectwise_data.get('company_id'),
+            'public_key': connectwise_data.get('public_key'),
+            'private_key': connectwise_data.get('private_key'),
+            'client_id': connectwise_data.get('client_id')
+        }
+        
+        return ConnectWiseCredentials(**credentials_data)
     except Exception as e:
-        raise Exception(f"Failed to get credentials from {secret_name}: {str(e)}")
+        raise Exception(f"Failed to get ConnectWise credentials from {secret_name}: {str(e)}")
 
 
 def process_table(

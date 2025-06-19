@@ -1,0 +1,182 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infrastructure/**'
+      - 'src/**'
+      - '.github/workflows/deploy-production.yml'
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: 'Force deployment even if no changes detected'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  AWS_REGION: us-east-1
+  ENVIRONMENT: prod
+
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: 'infrastructure/package-lock.json'
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        cache: 'pip'
+        cache-dependency-path: 'infrastructure/requirements.txt'
+    
+    - name: Install AWS CDK
+      run: npm install -g aws-cdk
+    
+    - name: Install Python dependencies
+      run: |
+        cd infrastructure
+        pip install -r requirements.txt
+    
+    - name: Configure AWS credentials for production
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
+        aws-region: ${{ env.AWS_REGION }}
+        role-to-assume: ${{ secrets.AWS_PROD_DEPLOYMENT_ROLE_ARN }}
+        role-duration-seconds: 3600
+        role-session-name: GitHubActions-ProductionDeployment
+    
+    - name: Verify AWS credentials
+      run: |
+        aws sts get-caller-identity
+        echo "Deploying to account: $(aws sts get-caller-identity --query Account --output text)"
+    
+    - name: Set environment variables
+      run: |
+        echo "CDK_PROD_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_ENV
+        echo "CDK_DEFAULT_REGION=${{ env.AWS_REGION }}" >> $GITHUB_ENV
+    
+    - name: Bootstrap CDK (if needed)
+      run: |
+        cd infrastructure
+        # Check if CDK is already bootstrapped
+        if ! aws cloudformation describe-stacks --stack-name CDKToolkit --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
+          echo "Bootstrapping CDK..."
+          cdk bootstrap --context environment=${{ env.ENVIRONMENT }}
+        else
+          echo "CDK already bootstrapped"
+        fi
+    
+    - name: Synthesize CDK app
+      run: |
+        cd infrastructure
+        cdk synth --context environment=${{ env.ENVIRONMENT }} --all
+    
+    - name: Deploy infrastructure
+      run: |
+        cd infrastructure
+        cdk deploy --all --context environment=${{ env.ENVIRONMENT }} --require-approval never
+    
+    - name: Validate deployment
+      run: |
+        echo "Validating deployment..."
+        
+        # Check Lambda functions
+        echo "Checking Lambda functions..."
+        aws lambda list-functions --query 'Functions[?contains(FunctionName, `avesa`) && contains(FunctionName, `prod`)].FunctionName' --output table
+        
+        # Check DynamoDB tables
+        echo "Checking DynamoDB tables..."
+        aws dynamodb describe-table --table-name TenantServices --query 'Table.TableStatus' --output text
+        aws dynamodb describe-table --table-name LastUpdated --query 'Table.TableStatus' --output text
+        
+        # Check S3 bucket
+        echo "Checking S3 bucket..."
+        aws s3 ls s3://data-storage-msp-prod/ --summarize
+        
+        echo "✅ Deployment validation completed"
+    
+    - name: Test Lambda function
+      run: |
+        echo "Testing ConnectWise Lambda function..."
+        aws lambda invoke \
+          --function-name avesa-connectwise-ingestion-prod \
+          --payload '{"test": true}' \
+          --cli-binary-format raw-in-base64-out \
+          response.json
+        
+        echo "Lambda response:"
+        cat response.json
+        
+        # Check for errors in response
+        if grep -q "errorMessage" response.json; then
+          echo "❌ Lambda function returned an error"
+          exit 1
+        else
+          echo "✅ Lambda function test passed"
+        fi
+    
+    - name: Create deployment summary
+      run: |
+        echo "## 🚀 Production Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Environment:** ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
+        echo "**AWS Account:** $(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_STEP_SUMMARY
+        echo "**Region:** ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Deployed at:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📊 Deployed Resources" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Lambda Functions:**" >> $GITHUB_STEP_SUMMARY
+        aws lambda list-functions --query 'Functions[?contains(FunctionName, `avesa`) && contains(FunctionName, `prod`)].FunctionName' --output text | tr '\t' '\n' | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**DynamoDB Tables:**" >> $GITHUB_STEP_SUMMARY
+        echo "- TenantServices" >> $GITHUB_STEP_SUMMARY
+        echo "- LastUpdated" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**S3 Buckets:**" >> $GITHUB_STEP_SUMMARY
+        echo "- data-storage-msp-prod" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔗 Next Steps" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "1. **Data Migration:** Run \`python3 scripts/migrate-production-data.py --execute\`" >> $GITHUB_STEP_SUMMARY
+        echo "2. **Testing:** Validate all integrations are working correctly" >> $GITHUB_STEP_SUMMARY
+        echo "3. **Monitoring:** Set up alerts and dashboards" >> $GITHUB_STEP_SUMMARY
+        echo "4. **DNS Update:** Point production traffic to new account" >> $GITHUB_STEP_SUMMARY
+
+  notify-deployment:
+    needs: deploy-production
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Notify deployment status
+      uses: 8398a7/action-slack@v3
+      if: always()
+      with:
+        status: ${{ needs.deploy-production.result }}
+        channel: '#deployments'
+        text: |
+          Production deployment ${{ needs.deploy-production.result }}!
+          
+          Environment: ${{ env.ENVIRONMENT }}
+          Commit: ${{ github.sha }}
+          Actor: ${{ github.actor }}
+          
+          ${{ needs.deploy-production.result == 'success' && '✅ Ready for data migration and testing' || '❌ Please check logs and retry' }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

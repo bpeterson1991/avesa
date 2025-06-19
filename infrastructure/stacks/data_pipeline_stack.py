@@ -37,7 +37,7 @@ class DataPipelineStack(Stack):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        self.environment = environment
+        self.env_name = environment
         self.bucket_name = bucket_name
 
         # Create S3 bucket for data storage
@@ -55,7 +55,9 @@ class DataPipelineStack(Stack):
             memory=lambda_memory,
             timeout=lambda_timeout
         )
-        self.canonical_transform_lambda = self._create_canonical_transform_lambda(
+        
+        # Create separate Lambda functions for each canonical table
+        self.canonical_transform_lambdas = self._create_canonical_transform_lambdas(
             memory=lambda_memory,
             timeout=lambda_timeout
         )
@@ -64,39 +66,19 @@ class DataPipelineStack(Stack):
         self._create_scheduled_rules()
 
     def _create_data_bucket(self) -> s3.Bucket:
-        """Create S3 bucket for data storage with proper lifecycle policies."""
+        """Create S3 bucket for data storage."""
         bucket = s3.Bucket(
             self,
             "DataBucket",
             bucket_name=self.bucket_name,
-            versioning=s3.BucketVersioning.ENABLED,
-            removal_policy=RemovalPolicy.RETAIN,
+            versioned=True,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            removal_policy=RemovalPolicy.RETAIN,  # Keep data safe in production
             lifecycle_rules=[
                 s3.LifecycleRule(
-                    id="raw-data-lifecycle",
-                    enabled=True,
-                    prefix="*/raw/",
-                    transitions=[
-                        s3.Transition(
-                            storage_class=s3.StorageClass.INFREQUENT_ACCESS,
-                            transition_after=Duration.days(30)
-                        ),
-                        s3.Transition(
-                            storage_class=s3.StorageClass.GLACIER,
-                            transition_after=Duration.days(90)
-                        )
-                    ]
-                ),
-                s3.LifecycleRule(
-                    id="canonical-data-lifecycle",
-                    enabled=True,
-                    prefix="*/canonical/",
-                    transitions=[
-                        s3.Transition(
-                            storage_class=s3.StorageClass.INFREQUENT_ACCESS,
-                            transition_after=Duration.days(90)
-                        )
-                    ]
+                    id="DeleteIncompleteMultipartUploads",
+                    abort_incomplete_multipart_upload_after=Duration.days(7)
                 )
             ]
         )
@@ -104,28 +86,38 @@ class DataPipelineStack(Stack):
 
     def _create_tenant_services_table(self) -> dynamodb.Table:
         """Create DynamoDB table for tenant service configuration."""
+        # Remove environment suffix for production (hybrid account approach)
+        table_name = "TenantServices" if self.env_name == "prod" else f"TenantServices-{self.env_name}"
+        
         table = dynamodb.Table(
             self,
             "TenantServicesTable",
-            table_name=f"TenantServices-{self.environment}",
+            table_name=table_name,
             partition_key=dynamodb.Attribute(
                 name="tenant_id",
                 type=dynamodb.AttributeType.STRING
             ),
+            sort_key=dynamodb.Attribute(
+                name="service",
+                type=dynamodb.AttributeType.STRING
+            ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.RETAIN,
+            removal_policy=RemovalPolicy.RETAIN,  # Keep data safe in production
             point_in_time_recovery=True
         )
         return table
 
     def _create_last_updated_table(self) -> dynamodb.Table:
         """Create DynamoDB table for tracking last updated timestamps."""
+        # Remove environment suffix for production (hybrid account approach)
+        table_name = "LastUpdated" if self.env_name == "prod" else f"LastUpdated-{self.env_name}"
+        
         table = dynamodb.Table(
             self,
             "LastUpdatedTable",
-            table_name=f"LastUpdated-{self.environment}",
+            table_name=table_name,
             partition_key=dynamodb.Attribute(
-                name="tenant_id",
+                name="tenant_service",
                 type=dynamodb.AttributeType.STRING
             ),
             sort_key=dynamodb.Attribute(
@@ -133,7 +125,7 @@ class DataPipelineStack(Stack):
                 type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.RETAIN,
+            removal_policy=RemovalPolicy.RETAIN,  # Keep data safe in production
             point_in_time_recovery=True
         )
         return table
@@ -198,7 +190,7 @@ class DataPipelineStack(Stack):
         function = _lambda.Function(
             self,
             "ConnectWiseLambda",
-            function_name=f"avesa-connectwise-ingestion-{self.environment}",
+            function_name=f"avesa-connectwise-ingestion-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="lambda_function.lambda_handler",
             code=_lambda.Code.from_asset("../src/integrations/connectwise"),
@@ -209,60 +201,73 @@ class DataPipelineStack(Stack):
                 "BUCKET_NAME": self.data_bucket.bucket_name,
                 "TENANT_SERVICES_TABLE": self.tenant_services_table.table_name,
                 "LAST_UPDATED_TABLE": self.last_updated_table.table_name,
-                "ENVIRONMENT": self.environment,
+                "ENVIRONMENT": self.env_name,
                 "SERVICE_NAME": "connectwise"
             },
             log_retention=logs.RetentionDays.ONE_MONTH
         )
         return function
 
-    def _create_canonical_transform_lambda(self, memory: int, timeout: int) -> _lambda.Function:
-        """Create Lambda function for canonical transformation (processes all integration services)."""
-        function = _lambda.Function(
-            self,
-            "CanonicalTransformLambda",
-            function_name=f"avesa-canonical-transform-{self.environment}",
-            runtime=_lambda.Runtime.PYTHON_3_9,
-            handler="lambda_function.lambda_handler",
-            code=_lambda.Code.from_asset("../src/canonical_transform"),
-            role=self.lambda_role,
-            memory_size=memory,
-            timeout=Duration.seconds(timeout),
-            environment={
-                "BUCKET_NAME": self.data_bucket.bucket_name,
-                "TENANT_SERVICES_TABLE": self.tenant_services_table.table_name,
-                "ENVIRONMENT": self.environment
-            },
-            log_retention=logs.RetentionDays.ONE_MONTH
-        )
-        return function
+    def _create_canonical_transform_lambdas(self, memory: int, timeout: int) -> Dict[str, _lambda.Function]:
+        """Create separate Lambda functions for each canonical table transformation."""
+        canonical_tables = ["tickets", "time_entries", "companies", "contacts"]
+        lambdas = {}
+        
+        for table in canonical_tables:
+            function = _lambda.Function(
+                self,
+                f"CanonicalTransform{table.title().replace('_', '')}Lambda",
+                function_name=f"avesa-canonical-transform-{table.replace('_', '-')}-{self.env_name}",
+                runtime=_lambda.Runtime.PYTHON_3_9,
+                handler="lambda_function.lambda_handler",
+                code=_lambda.Code.from_asset("../src/canonical_transform"),
+                role=self.lambda_role,
+                memory_size=memory,
+                timeout=Duration.seconds(timeout),
+                environment={
+                    "BUCKET_NAME": self.data_bucket.bucket_name,
+                    "TENANT_SERVICES_TABLE": self.tenant_services_table.table_name,
+                    "ENVIRONMENT": self.env_name,
+                    "CANONICAL_TABLE": table
+                },
+                log_retention=logs.RetentionDays.ONE_MONTH
+            )
+            lambdas[table] = function
+        
+        return lambdas
 
     def _create_scheduled_rules(self) -> None:
         """Create EventBridge rules for scheduled execution."""
-        # ConnectWise ingestion - every 15 minutes
+        # ConnectWise ingestion - every hour
         connectwise_rule = events.Rule(
             self,
             "ConnectWiseIngestionSchedule",
-            schedule=events.Schedule.rate(Duration.minutes(15)),
-            description="Trigger ConnectWise data ingestion every 15 minutes"
+            schedule=events.Schedule.rate(Duration.hours(1)),
+            description="Trigger ConnectWise data ingestion every hour"
         )
         connectwise_rule.add_target(
             targets.LambdaFunction(self.connectwise_lambda)
         )
 
-        # Canonical transformation - every 30 minutes (offset by 10 minutes)
-        canonical_transform_rule = events.Rule(
-            self,
-            "CanonicalTransformSchedule",
-            schedule=events.Schedule.cron(
-                minute="10,40",
-                hour="*",
-                day="*",
-                month="*",
-                year="*"
-            ),
-            description="Trigger canonical transformation every 30 minutes"
-        )
-        canonical_transform_rule.add_target(
-            targets.LambdaFunction(self.canonical_transform_lambda)
-        )
+        # Canonical transformation - every hour (offset by 15 minutes after ingestion)
+        # Create separate schedules for each canonical table
+        canonical_tables = ["tickets", "time_entries", "companies", "contacts"]
+        for i, table in enumerate(canonical_tables):
+            # Stagger each transformation by 5 minutes to avoid conflicts
+            minute_offset = 15 + (i * 5)  # 15, 20, 25, 30
+            
+            canonical_transform_rule = events.Rule(
+                self,
+                f"CanonicalTransform{table.title().replace('_', '')}Schedule",
+                schedule=events.Schedule.cron(
+                    minute=str(minute_offset),
+                    hour="*",
+                    day="*",
+                    month="*",
+                    year="*"
+                ),
+                description=f"Trigger {table} canonical transformation every hour at :{minute_offset:02d}"
+            )
+            canonical_transform_rule.add_target(
+                targets.LambdaFunction(self.canonical_transform_lambdas[table])
+            )

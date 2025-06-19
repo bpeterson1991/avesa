@@ -45,9 +45,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
         logger.info("Starting canonical transformation", execution_id=context.aws_request_id)
         
-        # Get target tenant and table from event (optional)
+        # Get target tenant and table from event or environment variable
         target_tenant = event.get('tenant_id')
-        target_table = event.get('table_name')
+        target_table = event.get('table_name') or os.environ.get('CANONICAL_TABLE')
         
         # Get tenant configurations
         tenants = get_tenant_configurations(config, target_tenant)
@@ -62,7 +62,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 
                 # Filter mappings if specific table requested
                 if target_table:
-                    mappings = {k: v for k, v in mappings.items() if target_table in str(v)}
+                    mappings = {k: v for k, v in mappings.items() if k == target_table}
                 
                 for canonical_table, mapping in mappings.items():
                     table_logger = PipelineLogger("canonical_transform", tenant_config.tenant_id, canonical_table)

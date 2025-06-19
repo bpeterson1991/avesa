@@ -30,7 +30,7 @@ class MonitoringStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
 
         self.data_pipeline_stack = data_pipeline_stack
-        self.environment = environment
+        self.env_name = environment
 
         # Create SNS topic for alerts
         self.alert_topic = self._create_alert_topic()
@@ -47,7 +47,7 @@ class MonitoringStack(Stack):
         topic = sns.Topic(
             self,
             "PipelineAlerts",
-            topic_name=f"connectwise-pipeline-alerts-{self.environment}",
+            topic_name=f"connectwise-pipeline-alerts-{self.env_name}",
             display_name="ConnectWise Pipeline Alerts"
         )
 
@@ -65,33 +65,37 @@ class MonitoringStack(Stack):
         dashboard = cloudwatch.Dashboard(
             self,
             "PipelineDashboard",
-            dashboard_name=f"ConnectWise-Pipeline-{self.environment}"
+            dashboard_name=f"ConnectWise-Pipeline-{self.env_name}"
         )
 
         # Lambda function metrics
+        canonical_invocation_metrics = [
+            lambda_func.metric_invocations()
+            for lambda_func in self.data_pipeline_stack.canonical_transform_lambdas.values()
+        ]
+        canonical_duration_metrics = [
+            lambda_func.metric_duration()
+            for lambda_func in self.data_pipeline_stack.canonical_transform_lambdas.values()
+        ]
+        canonical_error_metrics = [
+            lambda_func.metric_errors()
+            for lambda_func in self.data_pipeline_stack.canonical_transform_lambdas.values()
+        ]
+        
         lambda_widgets = [
             cloudwatch.GraphWidget(
                 title="Lambda Invocations",
-                left=[
-                    self.data_pipeline_stack.raw_ingestion_lambda.metric_invocations(),
-                    self.data_pipeline_stack.canonical_transform_lambda.metric_invocations()
-                ],
+                left=[self.data_pipeline_stack.connectwise_lambda.metric_invocations()] + canonical_invocation_metrics,
                 period=Duration.minutes(5)
             ),
             cloudwatch.GraphWidget(
                 title="Lambda Duration",
-                left=[
-                    self.data_pipeline_stack.raw_ingestion_lambda.metric_duration(),
-                    self.data_pipeline_stack.canonical_transform_lambda.metric_duration()
-                ],
+                left=[self.data_pipeline_stack.connectwise_lambda.metric_duration()] + canonical_duration_metrics,
                 period=Duration.minutes(5)
             ),
             cloudwatch.GraphWidget(
                 title="Lambda Errors",
-                left=[
-                    self.data_pipeline_stack.raw_ingestion_lambda.metric_errors(),
-                    self.data_pipeline_stack.canonical_transform_lambda.metric_errors()
-                ],
+                left=[self.data_pipeline_stack.connectwise_lambda.metric_errors()] + canonical_error_metrics,
                 period=Duration.minutes(5)
             )
         ]
@@ -138,71 +142,70 @@ class MonitoringStack(Stack):
 
     def _create_lambda_alarms(self) -> None:
         """Create CloudWatch alarms for Lambda functions."""
-        # Raw ingestion Lambda alarms
-        raw_error_alarm = cloudwatch.Alarm(
+        # ConnectWise ingestion Lambda alarms
+        connectwise_error_alarm = cloudwatch.Alarm(
             self,
-            "RawIngestionErrorAlarm",
-            alarm_name=f"connectwise-raw-ingestion-errors-{self.environment}",
-            metric=self.data_pipeline_stack.raw_ingestion_lambda.metric_errors(
+            "ConnectWiseIngestionErrorAlarm",
+            alarm_name=f"connectwise-ingestion-errors-{self.env_name}",
+            metric=self.data_pipeline_stack.connectwise_lambda.metric_errors(
                 period=Duration.minutes(5)
             ),
             threshold=1,
             evaluation_periods=1,
             comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-            alarm_description="Raw ingestion Lambda function errors"
+            alarm_description="ConnectWise ingestion Lambda function errors"
         )
-        raw_error_alarm.add_alarm_action(
+        connectwise_error_alarm.add_alarm_action(
             cw_actions.SnsAction(self.alert_topic)
         )
 
-        raw_duration_alarm = cloudwatch.Alarm(
+        connectwise_duration_alarm = cloudwatch.Alarm(
             self,
-            "RawIngestionDurationAlarm",
-            alarm_name=f"connectwise-raw-ingestion-duration-{self.environment}",
-            metric=self.data_pipeline_stack.raw_ingestion_lambda.metric_duration(
+            "ConnectWiseIngestionDurationAlarm",
+            alarm_name=f"connectwise-ingestion-duration-{self.env_name}",
+            metric=self.data_pipeline_stack.connectwise_lambda.metric_duration(
                 period=Duration.minutes(5)
             ),
             threshold=240000,  # 4 minutes in milliseconds
             evaluation_periods=2,
             comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
-            alarm_description="Raw ingestion Lambda function duration too high"
+            alarm_description="ConnectWise ingestion Lambda function duration too high"
         )
-        raw_duration_alarm.add_alarm_action(
+        connectwise_duration_alarm.add_alarm_action(
             cw_actions.SnsAction(self.alert_topic)
         )
 
-        # Canonical transform Lambda alarms
-        canonical_error_alarm = cloudwatch.Alarm(
-            self,
-            "CanonicalTransformErrorAlarm",
-            alarm_name=f"connectwise-canonical-transform-errors-{self.environment}",
-            metric=self.data_pipeline_stack.canonical_transform_lambda.metric_errors(
-                period=Duration.minutes(5)
-            ),
-            threshold=1,
-            evaluation_periods=1,
-            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-            alarm_description="Canonical transform Lambda function errors"
-        )
-        canonical_error_alarm.add_alarm_action(
-            cw_actions.SnsAction(self.alert_topic)
-        )
+        # Canonical transform Lambda alarms - create for each table
+        for table_name, lambda_func in self.data_pipeline_stack.canonical_transform_lambdas.items():
+            # Error alarm for each canonical transform function
+            canonical_error_alarm = cloudwatch.Alarm(
+                self,
+                f"CanonicalTransform{table_name.title().replace('_', '')}ErrorAlarm",
+                alarm_name=f"connectwise-canonical-transform-{table_name.replace('_', '-')}-errors-{self.env_name}",
+                metric=lambda_func.metric_errors(period=Duration.minutes(5)),
+                threshold=1,
+                evaluation_periods=1,
+                comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+                alarm_description=f"Canonical transform {table_name} Lambda function errors"
+            )
+            canonical_error_alarm.add_alarm_action(
+                cw_actions.SnsAction(self.alert_topic)
+            )
 
-        canonical_duration_alarm = cloudwatch.Alarm(
-            self,
-            "CanonicalTransformDurationAlarm",
-            alarm_name=f"connectwise-canonical-transform-duration-{self.environment}",
-            metric=self.data_pipeline_stack.canonical_transform_lambda.metric_duration(
-                period=Duration.minutes(5)
-            ),
-            threshold=480000,  # 8 minutes in milliseconds
-            evaluation_periods=2,
-            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
-            alarm_description="Canonical transform Lambda function duration too high"
-        )
-        canonical_duration_alarm.add_alarm_action(
-            cw_actions.SnsAction(self.alert_topic)
-        )
+            # Duration alarm for each canonical transform function
+            canonical_duration_alarm = cloudwatch.Alarm(
+                self,
+                f"CanonicalTransform{table_name.title().replace('_', '')}DurationAlarm",
+                alarm_name=f"connectwise-canonical-transform-{table_name.replace('_', '-')}-duration-{self.env_name}",
+                metric=lambda_func.metric_duration(period=Duration.minutes(5)),
+                threshold=480000,  # 8 minutes in milliseconds
+                evaluation_periods=2,
+                comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+                alarm_description=f"Canonical transform {table_name} Lambda function duration too high"
+            )
+            canonical_duration_alarm.add_alarm_action(
+                cw_actions.SnsAction(self.alert_topic)
+            )
 
     def _create_data_quality_alarms(self) -> None:
         """Create custom metric alarms for data quality monitoring."""
@@ -210,12 +213,12 @@ class MonitoringStack(Stack):
         data_freshness_alarm = cloudwatch.Alarm(
             self,
             "DataFreshnessAlarm",
-            alarm_name=f"connectwise-data-freshness-{self.environment}",
+            alarm_name=f"connectwise-data-freshness-{self.env_name}",
             metric=cloudwatch.Metric(
                 namespace="ConnectWise/Pipeline",
                 metric_name="DataFreshness",
                 dimensions_map={
-                    "Environment": self.environment
+                    "Environment": self.env_name
                 },
                 period=Duration.minutes(30)
             ),
@@ -233,12 +236,12 @@ class MonitoringStack(Stack):
         record_count_alarm = cloudwatch.Alarm(
             self,
             "RecordCountAnomalyAlarm",
-            alarm_name=f"connectwise-record-count-anomaly-{self.environment}",
+            alarm_name=f"connectwise-record-count-anomaly-{self.env_name}",
             metric=cloudwatch.Metric(
                 namespace="ConnectWise/Pipeline",
                 metric_name="RecordCountAnomaly",
                 dimensions_map={
-                    "Environment": self.environment
+                    "Environment": self.env_name
                 },
                 period=Duration.minutes(15)
             ),

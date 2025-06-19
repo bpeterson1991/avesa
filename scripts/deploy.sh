@@ -141,16 +141,47 @@ if [[ "$ENVIRONMENT" != "prod" ]]; then
 fi
 
 # Upload canonical mappings
-aws s3 cp mappings/canonical_mappings.json "s3://$BUCKET_NAME/mappings/canonical_mappings.json" --region "$REGION"
+if [[ -f "mappings/canonical_mappings.json" ]]; then
+    aws s3 cp mappings/canonical_mappings.json "s3://$BUCKET_NAME/mappings/canonical_mappings.json" --region "$REGION"
+    print_status "✓ Uploaded canonical mappings"
+else
+    print_warning "canonical_mappings.json not found, skipping upload"
+fi
+
+# Upload integration endpoint configurations
+if [[ -d "mappings/integrations" ]]; then
+    aws s3 sync mappings/integrations/ "s3://$BUCKET_NAME/mappings/integrations/" --region "$REGION"
+    print_status "✓ Uploaded integration endpoint configurations"
+else
+    print_warning "mappings/integrations directory not found, skipping upload"
+fi
 
 print_status "Deployment completed successfully!"
 print_status ""
 print_status "Next steps:"
-print_status "1. Configure tenant settings in DynamoDB table: TenantServices-$ENVIRONMENT"
-print_status "2. Create ConnectWise API credentials in AWS Secrets Manager"
-print_status "3. Test the pipeline with a sample tenant"
+print_status "1. Create a tenant using the new tenant-only script:"
+print_status "   python scripts/setup-tenant-only.py --tenant-id 'example-tenant' --company-name 'Example Company' --environment $ENVIRONMENT"
+print_status ""
+print_status "2. Add services to the tenant (e.g., ConnectWise):"
+print_status "   python scripts/setup-service.py --tenant-id 'example-tenant' --service connectwise \\"
+print_status "     --connectwise-url 'https://api-na.myconnectwise.net' \\"
+print_status "     --company-id 'YourCompanyID' --public-key 'your-key' \\"
+print_status "     --private-key 'your-private-key' --client-id 'your-client-id' \\"
+print_status "     --environment $ENVIRONMENT"
+print_status ""
+print_status "3. Test the pipeline with the configured tenant:"
+print_status "   aws lambda invoke --function-name avesa-connectwise-ingestion-$ENVIRONMENT \\"
+print_status "     --payload '{\"tenant_id\": \"example-tenant\"}' response.json --region $REGION"
 print_status ""
 print_status "Useful commands:"
+print_status "  # View tenant configurations"
 print_status "  aws dynamodb scan --table-name TenantServices-$ENVIRONMENT --region $REGION"
-print_status "  aws logs tail /aws/lambda/connectwise-raw-ingestion-$ENVIRONMENT --follow --region $REGION"
+print_status ""
+print_status "  # View tenant secrets"
+print_status "  aws secretsmanager list-secrets --filters Key=name,Values=tenant/ --region $REGION"
+print_status ""
+print_status "  # Monitor Lambda logs"
+print_status "  aws logs tail /aws/lambda/avesa-connectwise-ingestion-$ENVIRONMENT --follow --region $REGION"
+print_status ""
+print_status "  # Check S3 data"
 print_status "  aws s3 ls s3://$BUCKET_NAME/ --recursive --region $REGION"
