@@ -311,7 +311,7 @@ def load_canonical_mapping(canonical_table: str) -> Dict[str, Any]:
     """Load canonical mapping configuration."""
     try:
         # Try to load from S3 first
-        mapping_key = f"mappings/{canonical_table}.json"
+        mapping_key = f"mappings/canonical/{canonical_table}.json"
         response = s3.get_object(Bucket=os.environ['BUCKET_NAME'], Key=mapping_key)
         return json.loads(response['Body'].read().decode('utf-8'))
     except:

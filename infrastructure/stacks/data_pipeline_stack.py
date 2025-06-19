@@ -4,6 +4,23 @@ S3 bucket, and IAM roles for the AVESA multi-tenant data pipeline.
 
 Supports 30+ integration services (ConnectWise, ServiceNow, Salesforce, etc.)
 with multi-tenant architecture where each service has dedicated lambda functions.
+
+DYNAMODB SCHEMA DOCUMENTATION:
+
+1. TenantServices Table:
+   - Partition Key: tenant_id (STRING) - Identifies the tenant organization
+   - Sort Key: service (STRING) - Identifies the integration service (e.g., 'connectwise', 'servicenow')
+   - Purpose: Stores which services are enabled for each tenant, along with configuration metadata
+   - Example Key: tenant_id='acme-corp', service='connectwise'
+
+2. LastUpdated Table:
+   - Partition Key: tenant_id (STRING) - Identifies the tenant organization
+   - Sort Key: table_name (STRING) - Identifies the specific table/endpoint being tracked
+   - Purpose: Tracks incremental sync timestamps for each tenant/table combination
+   - Example Key: tenant_id='acme-corp', table_name='service/tickets'
+   
+CRITICAL: The LastUpdated table schema was corrected from using 'tenant_service' as partition key
+to 'tenant_id' to match Lambda function expectations and ensure proper incremental sync functionality.
 """
 
 from aws_cdk import (
@@ -85,7 +102,16 @@ class DataPipelineStack(Stack):
         return bucket
 
     def _create_tenant_services_table(self) -> dynamodb.Table:
-        """Create DynamoDB table for tenant service configuration."""
+        """
+        Create DynamoDB table for tenant service configuration.
+        
+        Schema:
+        - Partition Key: tenant_id (STRING) - Identifies the tenant
+        - Sort Key: service (STRING) - Identifies the specific service (e.g., 'connectwise', 'servicenow')
+        
+        This table stores configuration for which services are enabled for each tenant,
+        along with metadata like company name, secret references, and service status.
+        """
         # Remove environment suffix for production (hybrid account approach)
         table_name = "TenantServices" if self.env_name == "prod" else f"TenantServices-{self.env_name}"
         
@@ -108,7 +134,16 @@ class DataPipelineStack(Stack):
         return table
 
     def _create_last_updated_table(self) -> dynamodb.Table:
-        """Create DynamoDB table for tracking last updated timestamps."""
+        """
+        Create DynamoDB table for tracking last updated timestamps.
+        
+        Schema:
+        - Partition Key: tenant_id (STRING) - Identifies the tenant
+        - Sort Key: table_name (STRING) - Identifies the specific table/endpoint
+        
+        This table tracks incremental sync timestamps for each tenant/table combination
+        to enable efficient incremental data processing.
+        """
         # Remove environment suffix for production (hybrid account approach)
         table_name = "LastUpdated" if self.env_name == "prod" else f"LastUpdated-{self.env_name}"
         
@@ -117,7 +152,7 @@ class DataPipelineStack(Stack):
             "LastUpdatedTable",
             table_name=table_name,
             partition_key=dynamodb.Attribute(
-                name="tenant_service",
+                name="tenant_id",
                 type=dynamodb.AttributeType.STRING
             ),
             sort_key=dynamodb.Attribute(

@@ -24,7 +24,7 @@ The AVESA data pipeline consists of:
 
 ```bash
 # Deploy complete dev environment infrastructure using CDK
-./scripts/deploy-dev-staging.sh --environment dev --region us-east-2
+./scripts/deploy.sh --environment dev --region us-east-2
 ```
 
 This script will:
@@ -52,7 +52,7 @@ This will:
 - ✅ Store test ConnectWise credentials in Secrets Manager
 - ✅ Configure the tenant for ConnectWise data ingestion
 
-**Note:** Tenants are created automatically when adding their first service. The DynamoDB schema uses a composite key (`tenant_id` + `service_name`), so tenant creation is handled seamlessly during service setup.
+**Note:** Tenants are created automatically when adding their first service. The DynamoDB schema uses a composite key (`tenant_id` + `service`), so tenant creation is handled seamlessly during service setup.
 
 ### 3. Test the Pipeline
 
@@ -206,7 +206,7 @@ Error: Requested resource not found
 ```
 **Solution**: Deploy the dev environment infrastructure
 ```bash
-./scripts/deploy-dev-staging.sh --environment dev --region us-east-2
+./scripts/deploy.sh --environment dev --region us-east-2
 ```
 
 #### 3. S3 Access Denied
@@ -302,10 +302,11 @@ s3://data-storage-msp-dev/
 │       ├── companies/
 │       └── contacts/
 └── mappings/
-    ├── tickets.json              # Canonical mapping for tickets
-    ├── time_entries.json         # Canonical mapping for time entries
-    ├── companies.json            # Canonical mapping for companies
-    ├── contacts.json             # Canonical mapping for contacts
+    ├── canonical/                # Canonical transformation mappings
+    │   ├── tickets.json          # Canonical mapping for tickets
+    │   ├── time_entries.json     # Canonical mapping for time entries
+    │   ├── companies.json        # Canonical mapping for companies
+    │   └── contacts.json         # Canonical mapping for contacts
     ├── backfill_config.json      # Backfill configuration
     └── integrations/
         └── connectwise_endpoints.json

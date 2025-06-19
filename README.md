@@ -72,18 +72,14 @@ avesa/
 │   │   ├── connectwise_endpoints.json    # ConnectWise endpoints and settings
 │   │   ├── servicenow_endpoints.json     # ServiceNow endpoints and settings
 │   │   └── salesforce_endpoints.json     # Salesforce endpoints and settings
-│   ├── tickets.json            # Canonical mapping for tickets table
-│   ├── time_entries.json       # Canonical mapping for time entries table
-│   ├── companies.json          # Canonical mapping for companies table
-│   ├── contacts.json           # Canonical mapping for contacts table
-│   ├── backfill_config.json    # Backfill configuration per service
-│   ├── tickets.json        # Canonical tickets table mapping
-│   ├── time_entries.json   # Canonical time entries table mapping
-│   ├── companies.json      # Canonical companies table mapping
-│   └── contacts.json       # Canonical contacts table mapping
+│   ├── canonical/              # Canonical transformation mappings
+│   │   ├── tickets.json        # Canonical tickets table mapping
+│   │   ├── time_entries.json   # Canonical time entries table mapping
+│   │   ├── companies.json      # Canonical companies table mapping
+│   │   └── contacts.json       # Canonical contacts table mapping
+│   └── backfill_config.json    # Backfill configuration per service
 ├── scripts/                # Deployment and utility scripts
-│   ├── deploy-prod.sh           # Deploy to production account
-│   ├── deploy-dev-staging.sh    # Deploy to dev/staging environments
+│   ├── deploy.sh                # Unified deployment script for all environments
 │   ├── deploy-lambda-functions.py # Update Lambda functions
 │   ├── test-lambda-functions.py # Test pipeline functionality
 │   ├── setup-service.py        # Add services to tenants (creates tenant if needed)
@@ -157,7 +153,7 @@ pip install -r requirements.txt
 
 2. Deploy infrastructure:
 ```bash
-./scripts/deploy-dev-staging.sh --environment dev
+./scripts/deploy.sh --environment dev
 ```
 
 3. Add services to tenants (creates tenant automatically):

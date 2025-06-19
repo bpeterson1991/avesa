@@ -81,7 +81,8 @@ def main():
         
         # Create tenant service entry in DynamoDB
         service_info = {
-            "enabled": args.enabled
+            "enabled": args.enabled,
+            "secret_name": secret_name
         }
         
         print(f"📊 Creating tenant service entry for {args.service}")
@@ -172,7 +173,7 @@ def get_tenant_service(dynamodb, table_name: str, tenant_id: str, service_name: 
             TableName=table_name,
             Key={
                 'tenant_id': {'S': tenant_id},
-                'service_name': {'S': service_name}
+                'service': {'S': service_name}
             }
         )
         return response.get('Item')
@@ -213,14 +214,15 @@ def create_tenant_service_entry(dynamodb, table_name: str, tenant_id: str, servi
     # Create the service entry with composite key
     service_entry = {
         'tenant_id': {'S': tenant_id},
-        'service_name': {'S': service},
+        'service': {'S': service},
         'company_name': {'S': company_name},
         'enabled': {'BOOL': service_info.get('enabled', True)},
+        'secret_name': {'S': service_info.get('secret_name', '')},
         'created_at': {'S': current_time},
         'updated_at': {'S': current_time}
     }
     
-    # Add service-specific configuration (currently just enabled status)
+    # Add service-specific configuration (currently just enabled status and secret name)
     # Additional service configuration is stored in secrets manager
     
     dynamodb.put_item(

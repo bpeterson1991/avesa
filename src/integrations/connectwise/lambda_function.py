@@ -1,11 +1,18 @@
 """
 ConnectWise Integration Lambda Function
 
-This function pulls data from ConnectWise REST API per tenant, flattens the JSON,
-filters out already-seen records based on `id`, and writes to S3 in Parquet format.
+This function pulls data from ConnectWise REST API per tenant using incremental ingestion strategy,
+flattens the JSON, and writes to S3 in Parquet format.
 
 This is a ConnectWise-specific lambda function that handles multiple ConnectWise endpoints/tables.
 This is a multi-tenant system where multiple customer organizations (tenants) share this lambda function.
+
+INCREMENTAL INGESTION STRATEGY:
+- Uses timestamp-based filtering with ConnectWise API conditions (_info/lastUpdated > [timestamp])
+- Maintains last_updated timestamps in DynamoDB for each tenant/table combination
+- Only processes records modified since the last successful run
+- Does NOT perform ID-based deduplication (handled by separate backfill function)
+- Optimized for real-time incremental data processing
 
 ConnectWise-specific features:
 - Uses ConnectWise API authentication (Basic Auth with API keys)
@@ -268,7 +275,17 @@ def process_table(
     table_name: str,
     logger: PipelineLogger
 ) -> Dict[str, Any]:
-    """Process a single table for a tenant."""
+    """
+    Process a single table for a tenant using incremental ingestion strategy.
+    
+    CORRECTED PROCESS FLOW:
+    1. Get last_updated timestamp from DynamoDB
+    2. Query ConnectWise API with conditions=_info/lastUpdated > [timestamp]
+    3. Process and write data to S3
+    4. ONLY if S3 write succeeds: Update last_updated timestamp in DynamoDB
+    
+    This ensures atomic operations and prevents timestamp updates on failures.
+    """
     start_time = datetime.now()
     
     try:
@@ -300,51 +317,41 @@ def process_table(
         # Flatten JSON data
         flattened_data = [flatten_json(record) for record in raw_data]
         
-        # Filter out existing records
-        new_records = filter_existing_records(
-            config=config,
-            tenant_id=tenant_config.tenant_id,
-            table_name=table_name,
-            records=flattened_data,
-            logger=logger
-        )
-        
-        if not new_records:
-            logger.info(f"No new records after filtering for table {table_name}")
-            return {
-                'tenant_id': tenant_config.tenant_id,
-                'table_name': table_name,
-                'status': 'success',
-                'record_count': 0,
-                'message': 'No new records after filtering'
-            }
-        
-        # Write to S3
+        # Write to S3 (atomic operation with timestamp update)
         timestamp = get_timestamp()
         s3_key = get_s3_key(tenant_config.tenant_id, 'raw', 'connectwise', table_name, timestamp)
         
-        write_parquet_to_s3(
-            config=config,
-            s3_key=s3_key,
-            data=new_records,
-            logger=logger
-        )
-        
-        # Update last updated timestamp
-        new_last_updated = get_max_last_updated(new_records)
-        if new_last_updated:
-            update_last_updated_timestamp(
+        try:
+            # Write data to S3
+            write_parquet_to_s3(
                 config=config,
-                tenant_id=tenant_config.tenant_id,
-                table_name=table_name,
-                timestamp=new_last_updated
+                s3_key=s3_key,
+                data=flattened_data,
+                logger=logger
             )
+            
+            # Only update timestamp after successful S3 write
+            new_last_updated = get_max_last_updated(flattened_data)
+            if new_last_updated:
+                update_last_updated_timestamp(
+                    config=config,
+                    tenant_id=tenant_config.tenant_id,
+                    table_name=table_name,
+                    timestamp=new_last_updated
+                )
+                logger.info(f"Updated last_updated timestamp to {new_last_updated}")
+            else:
+                logger.warning("No valid lastUpdated timestamp found in records")
+                
+        except Exception as e:
+            logger.error(f"Failed to write data to S3, timestamp not updated: {str(e)}")
+            raise
         
         execution_time = (datetime.now() - start_time).total_seconds()
         
         logger.log_data_processing(
             operation="raw_ingestion",
-            record_count=len(new_records),
+            record_count=len(flattened_data),
             execution_time=execution_time
         )
         
@@ -352,7 +359,7 @@ def process_table(
             'tenant_id': tenant_config.tenant_id,
             'table_name': table_name,
             'status': 'success',
-            'record_count': len(new_records),
+            'record_count': len(flattened_data),
             'execution_time': execution_time,
             's3_key': s3_key
         }
@@ -364,7 +371,12 @@ def process_table(
 
 
 def get_last_updated_timestamp(config: Config, tenant_id: str, table_name: str) -> Optional[str]:
-    """Get the last updated timestamp for a tenant/table combination."""
+    """
+    Get the last updated timestamp for a tenant/table combination.
+    
+    This timestamp represents the last successful incremental sync point.
+    Used to filter ConnectWise API calls to only fetch records modified since this time.
+    """
     try:
         response = dynamodb.get_item(
             TableName=config.last_updated_table,
@@ -383,7 +395,12 @@ def get_last_updated_timestamp(config: Config, tenant_id: str, table_name: str) 
 
 
 def update_last_updated_timestamp(config: Config, tenant_id: str, table_name: str, timestamp: str):
-    """Update the last updated timestamp for a tenant/table combination."""
+    """
+    Update the last updated timestamp for a tenant/table combination.
+    
+    This function should ONLY be called after successful S3 write operations
+    to ensure atomic behavior and prevent timestamp updates on failures.
+    """
     dynamodb.put_item(
         TableName=config.last_updated_table,
         Item={
@@ -403,7 +420,15 @@ def fetch_connectwise_data(
     config: Config,
     logger: PipelineLogger
 ) -> List[Dict[str, Any]]:
-    """Fetch data from ConnectWise API with pagination."""
+    """
+    Fetch data from ConnectWise API with pagination using incremental strategy.
+    
+    This function implements timestamp-based incremental ingestion:
+    - Uses ConnectWise API conditions parameter with _info/lastUpdated filter
+    - Only fetches records modified since the last successful run
+    - Does NOT perform ID-based deduplication (handled by separate backfill function)
+    - Optimized for real-time incremental data processing
+    """
     import requests
     
     all_records = []
@@ -426,9 +451,16 @@ def fetch_connectwise_data(
         'orderBy': 'id asc'
     }
     
-    # Add conditions for incremental sync
+    # Add conditions for incremental sync using timestamp-based filtering
+    # This is the core of the incremental ingestion strategy:
+    # - Only fetch records modified since the last successful run
+    # - Uses ConnectWise API's built-in _info/lastUpdated field
+    # - Avoids redundant ID-based filtering for performance
     if last_updated:
         params['conditions'] = f"_info/lastUpdated > [{last_updated}]"
+        logger.info(f"Using incremental sync with last_updated: {last_updated}")
+    else:
+        logger.info("No last_updated timestamp found, fetching all records (initial sync)")
     
     while True:
         params['page'] = page
@@ -475,75 +507,6 @@ def fetch_connectwise_data(
     return all_records
 
 
-def filter_existing_records(
-    config: Config,
-    tenant_id: str,
-    table_name: str,
-    records: List[Dict[str, Any]],
-    logger: PipelineLogger
-) -> List[Dict[str, Any]]:
-    """Filter out records that already exist in S3."""
-    try:
-        # Get existing record IDs from S3
-        existing_ids = get_existing_record_ids(config, tenant_id, table_name)
-        
-        if not existing_ids:
-            logger.info("No existing records found, all records are new")
-            return records
-        
-        # Filter out existing records
-        new_records = [record for record in records if record.get('id') not in existing_ids]
-        
-        logger.info(
-            f"Filtered records: {len(records)} total, {len(new_records)} new, {len(existing_ids)} existing"
-        )
-        
-        return new_records
-        
-    except Exception as e:
-        logger.warning(f"Failed to filter existing records, processing all: {str(e)}")
-        return records
-
-
-def get_existing_record_ids(config: Config, tenant_id: str, table_name: str) -> set:
-    """Get existing record IDs from S3 Parquet files."""
-    import pandas as pd
-    
-    try:
-        prefix = f"{tenant_id}/raw/connectwise/{table_name}/"
-        
-        response = s3.list_objects_v2(
-            Bucket=config.bucket_name,
-            Prefix=prefix
-        )
-        
-        if 'Contents' not in response:
-            return set()
-        
-        existing_ids = set()
-        
-        # Read IDs from recent files (limit to avoid memory issues)
-        recent_files = sorted(response['Contents'], key=lambda x: x['LastModified'], reverse=True)[:10]
-        
-        for obj in recent_files:
-            try:
-                # Read Parquet file
-                obj_response = s3.get_object(Bucket=config.bucket_name, Key=obj['Key'])
-                df = pd.read_parquet(obj_response['Body'])
-                
-                if 'id' in df.columns:
-                    existing_ids.update(df['id'].dropna().astype(str).tolist())
-                    
-            except Exception as e:
-                # Log but continue with other files
-                continue
-        
-        return existing_ids
-        
-    except Exception:
-        return set()
-
-
 def write_parquet_to_s3(config: Config, s3_key: str, data: List[Dict[str, Any]], logger: PipelineLogger):
     """Write data to S3 as Parquet format."""
     import pandas as pd
@@ -578,7 +541,12 @@ def write_parquet_to_s3(config: Config, s3_key: str, data: List[Dict[str, Any]],
 
 
 def get_max_last_updated(records: List[Dict[str, Any]]) -> Optional[str]:
-    """Get the maximum _info__lastUpdated value from records."""
+    """
+    Get the maximum _info__lastUpdated value from records.
+    
+    This timestamp will be used as the new checkpoint for the next incremental sync,
+    ensuring we don't miss any records and don't re-process the same data.
+    """
     try:
         last_updated_values = [
             record.get('_info__lastUpdated')

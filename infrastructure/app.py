@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-ConnectWise Data Pipeline CDK Application
+AVESA Multi-Tenant Data Pipeline CDK Application
 Updated for hybrid account strategy
 
 This is the main entry point for the CDK application that deploys
-the ConnectWise data ingestion and transformation pipeline.
+the AVESA multi-tenant data ingestion and transformation pipeline.
 Supports hybrid account isolation with production in separate account.
 """
 
@@ -27,7 +27,7 @@ ACCOUNTS = {
 # Get environment configuration
 environment = app.node.try_get_context("environment") or "dev"
 account = ACCOUNTS.get(environment, ACCOUNTS["dev"])
-region = os.environ.get("CDK_DEFAULT_REGION", "us-east-1")
+region = os.environ.get("CDK_DEFAULT_REGION", "us-east-2")
 
 # Validate production account is set when deploying to prod
 if environment == "prod" and not account:
@@ -65,7 +65,7 @@ env_config = config.get(environment, config["dev"])
 # Deploy main data pipeline stack
 data_pipeline_stack = DataPipelineStack(
     app,
-    f"ConnectWiseDataPipeline-{environment}",
+    f"AVESADataPipeline-{environment}",
     env=env,
     environment=environment,
     bucket_name=env_config["bucket_name"],
@@ -76,7 +76,7 @@ data_pipeline_stack = DataPipelineStack(
 # Deploy backfill stack
 backfill_stack = BackfillStack(
     app,
-    f"ConnectWiseBackfill-{environment}",
+    f"AVESABackfill-{environment}",
     env=env,
     environment=environment,
     data_bucket_name=env_config["bucket_name"],
@@ -89,7 +89,7 @@ backfill_stack = BackfillStack(
 if env_config.get("enable_monitoring"):
     monitoring_stack = MonitoringStack(
         app,
-        f"ConnectWiseMonitoring-{environment}",
+        f"AVESAMonitoring-{environment}",
         env=env,
         data_pipeline_stack=data_pipeline_stack,
         environment=environment
@@ -98,7 +98,7 @@ if env_config.get("enable_monitoring"):
 # Deploy cross-account monitoring stack
 cross_account_monitoring_stack = CrossAccountMonitoringStack(
     app,
-    f"ConnectWiseCrossAccountMonitoring-{environment}",
+    f"AVESACrossAccountMonitoring-{environment}",
     env=env,
     environment=environment,
     production_account_id=ACCOUNTS.get("prod") if environment != "prod" else None
