@@ -140,13 +140,14 @@ if [[ "$ENVIRONMENT" != "prod" ]]; then
     BUCKET_NAME="data-storage-msp-$ENVIRONMENT"
 fi
 
-# Upload canonical mappings
-if [[ -f "mappings/canonical_mappings.json" ]]; then
-    aws s3 cp mappings/canonical_mappings.json "s3://$BUCKET_NAME/mappings/canonical_mappings.json" --region "$REGION"
-    print_status "✓ Uploaded canonical mappings"
-else
-    print_warning "canonical_mappings.json not found, skipping upload"
-fi
+# Upload individual canonical mappings
+for mapping_file in mappings/*.json; do
+    if [[ -f "$mapping_file" && $(basename "$mapping_file") != "backfill_config.json" ]]; then
+        filename=$(basename "$mapping_file")
+        aws s3 cp "$mapping_file" "s3://$BUCKET_NAME/mappings/$filename" --region "$REGION"
+        print_status "✓ Uploaded mapping: $filename"
+    fi
+done
 
 # Upload integration endpoint configurations
 if [[ -d "mappings/integrations" ]]; then

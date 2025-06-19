@@ -72,7 +72,10 @@ avesa/
 │   │   ├── connectwise_endpoints.json    # ConnectWise endpoints and settings
 │   │   ├── servicenow_endpoints.json     # ServiceNow endpoints and settings
 │   │   └── salesforce_endpoints.json     # Salesforce endpoints and settings
-│   ├── canonical_mappings.json # Unified canonical schema definition
+│   ├── tickets.json            # Canonical mapping for tickets table
+│   ├── time_entries.json       # Canonical mapping for time entries table
+│   ├── companies.json          # Canonical mapping for companies table
+│   ├── contacts.json           # Canonical mapping for contacts table
 │   ├── backfill_config.json    # Backfill configuration per service
 │   ├── tickets.json        # Canonical tickets table mapping
 │   ├── time_entries.json   # Canonical time entries table mapping
@@ -85,8 +88,7 @@ avesa/
 │   ├── test-lambda-functions.py # Test pipeline functionality
 │   ├── setup-tenant.py         # Add new tenants
 │   ├── setup-service.py        # Add services to tenants
-│   ├── trigger-backfill.py     # Run backfill operations
-│   └── setup-dev-environment.py # Set up dev environment
+│   └── trigger-backfill.py     # Run backfill operations
 ├── docs/                   # Documentation
 │   ├── BACKFILL_STRATEGY.md
 │   ├── DEPLOYMENT.md

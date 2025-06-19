@@ -20,39 +20,48 @@ The AVESA data pipeline consists of:
 
 ## Quick Start
 
-### 1. Set Up Dev Environment Infrastructure
+### 1. Deploy Dev Environment Infrastructure
 
 ```bash
-# Create missing DynamoDB tables and S3 bucket for dev environment
-python scripts/setup-dev-environment.py --region us-east-2
-
-# If you want to see what would be created without actually creating it:
-python scripts/setup-dev-environment.py --region us-east-2 --dry-run
+# Deploy complete dev environment infrastructure using CDK
+./scripts/deploy-dev-staging.sh --environment dev --region us-east-2
 ```
 
 This script will:
 - ✅ Create `TenantServices-dev` and `LastUpdated-dev` DynamoDB tables
 - ✅ Create `data-storage-msp-dev` S3 bucket
+- ✅ Deploy Lambda functions with proper dependencies
 - ✅ Upload mapping configurations to S3
-- ✅ Create a test tenant with sample credentials
-- ✅ Validate the setup
+- ✅ Set up EventBridge scheduling rules
+- ✅ Configure IAM roles and policies
 
-### 2. Fix Lambda Function Dependencies
+### 2. Create a Test Tenant
 
 ```bash
-# Redeploy Lambda functions with fixed dependencies
-python scripts/deploy-lambda-functions.py --environment dev --region us-east-2
+# Create a test tenant
+python scripts/setup-tenant.py \
+  --tenant-id "test-tenant" \
+  --company-name "Test Company" \
+  --environment dev \
+  --region us-east-2
 
-# Deploy only specific functions if needed:
-python scripts/deploy-lambda-functions.py --environment dev --region us-east-2 --function connectwise
-python scripts/deploy-lambda-functions.py --environment dev --region us-east-2 --function canonical
+# Add ConnectWise service to the tenant
+python scripts/setup-service.py \
+  --tenant-id "test-tenant" \
+  --service connectwise \
+  --connectwise-url "https://api-na.myconnectwise.net" \
+  --company-id "TestCompany" \
+  --public-key "test-public-key" \
+  --private-key "test-private-key" \
+  --client-id "test-client-id" \
+  --environment dev \
+  --region us-east-2
 ```
 
-This script will:
-- ✅ Fix the `pydantic_core` import issues
-- ✅ Package shared modules correctly
-- ✅ Update environment variables
-- ✅ Deploy updated function code
+This will:
+- ✅ Create a test tenant in DynamoDB
+- ✅ Store test ConnectWise credentials in Secrets Manager
+- ✅ Configure the tenant for ConnectWise data ingestion
 
 ### 3. Test the Pipeline
 
@@ -200,9 +209,9 @@ python scripts/deploy-lambda-functions.py --environment dev --region us-east-2
 ```
 Error: Requested resource not found
 ```
-**Solution**: Create dev environment tables
+**Solution**: Deploy the dev environment infrastructure
 ```bash
-python scripts/setup-dev-environment.py --region us-east-2
+./scripts/deploy-dev-staging.sh --environment dev --region us-east-2
 ```
 
 #### 3. S3 Access Denied
@@ -297,7 +306,11 @@ s3://data-storage-msp-dev/
 │       ├── companies/
 │       └── contacts/
 └── mappings/
-    ├── canonical_mappings.json
+    ├── tickets.json              # Canonical mapping for tickets
+    ├── time_entries.json         # Canonical mapping for time entries
+    ├── companies.json            # Canonical mapping for companies
+    ├── contacts.json             # Canonical mapping for contacts
+    ├── backfill_config.json      # Backfill configuration
     └── integrations/
         └── connectwise_endpoints.json
 ```
