@@ -88,14 +88,10 @@ avesa/
 │   ├── trigger-backfill.py     # Run backfill operations
 │   └── setup-dev-environment.py # Set up dev environment
 ├── docs/                   # Documentation
-│   ├── HYBRID_ACCOUNT_SETUP_GUIDE.md
 │   ├── BACKFILL_STRATEGY.md
-│   ├── PRODUCTION_MIGRATION_PHASE5_PHASE6_REPORT.md
-│   ├── PRODUCTION_CLEANUP_REPORT.md
-│   └── MIGRATION_CHECKLIST.md
-├── tests/                  # Unit and integration tests
-├── ARCHITECTURE_TRANSFORMATION_SUMMARY.md # This transformation summary
-└── README_HYBRID_IMPLEMENTATION.md        # Hybrid implementation details
+│   ├── DEPLOYMENT.md
+│   └── DEV_ENVIRONMENT_SETUP_GUIDE.md
+└── tests/                  # Unit and integration tests
 ```
 
 ## Data Flow
