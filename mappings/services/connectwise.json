@@ -1,0 +1,19 @@
+{
+  "name": "ConnectWise",
+  "auth_mode": "api_key",
+  "required_fields": [
+    "api_url",
+    "company_id",
+    "public_key",
+    "private_key",
+    "client_id"
+  ],
+  "default_tables": [
+    "service/tickets",
+    "time/entries", 
+    "company/companies",
+    "company/contacts"
+  ],
+  "description": "ConnectWise PSA integration",
+  "lambda_function_prefix": "avesa-connectwise-ingestion"
+}

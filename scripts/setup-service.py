@@ -2,51 +2,28 @@
 """
 Service Setup Script
 
-This script adds or updates a service configuration for an existing tenant.
-It stores service-specific data and credentials in AWS Secrets Manager.
-Multiple services can be configured for each tenant.
+This script sets up a tenant with a service using configuration files.
+Service credentials can be provided via JSON file, environment variables, or interactively.
 """
 
 import argparse
 import boto3
 import json
 import sys
+import os
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from pathlib import Path
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Setup a service for an existing tenant')
-    parser.add_argument('--tenant-id', required=True, help='Existing tenant identifier')
-    parser.add_argument('--service', required=True, 
-                       choices=['connectwise', 'servicenow', 'salesforce'],
-                       help='Service to configure')
+    parser = argparse.ArgumentParser(description='Setup a tenant with a service')
+    parser.add_argument('--tenant-id', required=True, help='Tenant identifier')
+    parser.add_argument('--company-name', required=True, help='Company display name')
+    parser.add_argument('--service', required=True, help='Service to configure')
     parser.add_argument('--environment', default='dev', choices=['dev', 'staging', 'prod'],
                        help='Environment (default: dev)')
-    parser.add_argument('--region', default='us-east-1', help='AWS region (default: us-east-1)')
-    
-    # ConnectWise specific arguments
-    parser.add_argument('--connectwise-url', help='ConnectWise API base URL')
-    parser.add_argument('--company-id', help='ConnectWise company ID')
-    parser.add_argument('--public-key', help='ConnectWise public key')
-    parser.add_argument('--private-key', help='ConnectWise private key')
-    parser.add_argument('--client-id', help='ConnectWise client ID')
-    
-    # ServiceNow specific arguments
-    parser.add_argument('--servicenow-instance', help='ServiceNow instance URL')
-    parser.add_argument('--servicenow-username', help='ServiceNow username')
-    parser.add_argument('--servicenow-password', help='ServiceNow password')
-    
-    # Salesforce specific arguments
-    parser.add_argument('--salesforce-instance', help='Salesforce instance URL')
-    parser.add_argument('--salesforce-client-id', help='Salesforce client ID')
-    parser.add_argument('--salesforce-client-secret', help='Salesforce client secret')
-    parser.add_argument('--salesforce-username', help='Salesforce username')
-    parser.add_argument('--salesforce-password', help='Salesforce password')
-    parser.add_argument('--salesforce-security-token', help='Salesforce security token')
-    
-    # Common arguments
-    parser.add_argument('--tables', nargs='+', help='Tables/endpoints to sync for this service')
+    parser.add_argument('--region', default='us-east-2', help='AWS region (default: us-east-2)')
     parser.add_argument('--enabled', action='store_true', default=True, 
                        help='Enable service (default: True)')
     parser.add_argument('--dry-run', action='store_true', 
@@ -54,16 +31,25 @@ def main():
     
     args = parser.parse_args()
     
+    # Load service configuration
+    available_services = list_available_services()
+    if args.service not in available_services:
+        print(f"❌ Unknown service: {args.service}")
+        print(f"Available services: {', '.join(available_services)}")
+        sys.exit(1)
+    
+    service_config = load_service_config(args.service)
+    
     # Initialize AWS clients
     dynamodb = boto3.client('dynamodb', region_name=args.region)
     secrets = boto3.client('secretsmanager', region_name=args.region)
     
     # Table names and secret pattern
     tenant_services_table = f"TenantServices-{args.environment}"
-    secret_name = f"tenant/{args.tenant_id}/{args.environment}"
+    secret_name = f"{args.tenant_id}/{args.environment}"
     
-    print(f"Setting up service: {args.service}")
-    print(f"Tenant: {args.tenant_id}")
+    print(f"🔧 Setting up {service_config['name']} for tenant: {args.tenant_id}")
+    print(f"Company: {args.company_name}")
     print(f"Environment: {args.environment}")
     print(f"Region: {args.region}")
     print()
@@ -73,46 +59,40 @@ def main():
         print()
     
     try:
-        # Verify tenant exists
-        tenant = get_tenant(dynamodb, tenant_services_table, args.tenant_id)
-        if not tenant:
-            print(f"❌ Tenant {args.tenant_id} not found. Create it first using setup-tenant-only.py")
-            sys.exit(1)
+        # Get service credentials
+        credentials = get_service_credentials(args, service_config)
         
-        print(f"✓ Found tenant: {tenant.get('company_name', {}).get('S', 'Unknown')}")
+        # Check if tenant service combination already exists
+        existing_service = get_tenant_service(dynamodb, tenant_services_table, args.tenant_id, args.service)
+        if existing_service and not args.dry_run:
+            print(f"⚠️  Service {args.service} for tenant {args.tenant_id} already exists.")
+            response = input("Do you want to update this service configuration? (y/N): ")
+            if response.lower() != 'y':
+                print("Aborted.")
+                return
         
-        # Validate service-specific arguments
-        service_config = validate_and_build_service_config(args)
-        
-        # Get or create the tenant's secret
-        existing_secret = get_existing_secret(secrets, secret_name)
-        
-        # Update the secret with new service configuration
-        updated_secret = update_secret_with_service(existing_secret, args.service, service_config)
-        
-        # Store/update secret in AWS Secrets Manager
-        print(f"Updating secret: {secret_name}")
+        # Store credentials in AWS Secrets Manager
+        print(f"📝 Updating secret: {secret_name}")
         if not args.dry_run:
-            store_secret(secrets, secret_name, updated_secret, tenant.get('company_name', {}).get('S', 'Unknown'))
-            print("✓ Secret updated successfully")
+            store_service_credentials(secrets, secret_name, args.service, credentials, args.company_name)
+            print("✓ Credentials stored successfully")
         else:
-            print("✓ Would update secret with:")
-            print(f"  Service: {args.service}")
-            print(f"  Config keys: {list(service_config.keys())}")
+            print("✓ Would store credentials in secret")
         
-        # Update tenant configuration with service information
-        service_info = build_service_info(args)
-        print(f"Updating tenant configuration with {args.service} service info")
+        # Create tenant service entry in DynamoDB
+        service_info = {
+            "enabled": args.enabled
+        }
+        
+        print(f"📊 Creating tenant service entry for {args.service}")
         if not args.dry_run:
-            update_tenant_with_service(dynamodb, tenant_services_table, args.tenant_id, args.service, service_info)
-            print("✓ Tenant configuration updated successfully")
+            create_tenant_service_entry(dynamodb, tenant_services_table, args.tenant_id, args.service, service_info, args.company_name)
+            print("✓ Tenant service entry created successfully")
         else:
-            print("✓ Would update tenant configuration with:")
-            for key, value in service_info.items():
-                print(f"  {key}: {value}")
+            print("✓ Would create tenant service entry")
         
         print()
-        print("Setup completed successfully!")
+        print("✅ Setup completed successfully!")
         print()
         print("Next steps:")
         print("1. Verify the service configuration:")
@@ -122,147 +102,130 @@ def main():
         payload_json = json.dumps({"tenant_id": args.tenant_id})
         lambda_name = f"avesa-{args.service}-ingestion-{args.environment}"
         print(f"   aws lambda invoke --function-name {lambda_name} --payload '{payload_json}' response.json --region {args.region}")
-        print()
-        print("3. Monitor the logs:")
-        print(f"   aws logs tail /aws/lambda/{lambda_name} --follow --region {args.region}")
         
     except Exception as e:
-        print(f"Error setting up service: {str(e)}", file=sys.stderr)
+        print(f"❌ Error setting up service: {str(e)}", file=sys.stderr)
         sys.exit(1)
 
 
-def get_tenant(dynamodb, table_name: str, tenant_id: str) -> Optional[Dict[str, Any]]:
-    """Get tenant configuration from DynamoDB."""
+def load_service_config(service_name: str) -> Dict[str, Any]:
+    """Load service configuration from individual JSON file."""
+    config_path = Path(__file__).parent.parent / "mappings" / "services" / f"{service_name}.json"
+    try:
+        with open(config_path, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"❌ Service configuration file not found: {config_path}")
+        print(f"Available services can be found in: mappings/services/")
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        print(f"❌ Invalid JSON in service configuration file: {e}")
+        sys.exit(1)
+
+
+def list_available_services() -> List[str]:
+    """List available services by scanning the services directory."""
+    services_dir = Path(__file__).parent.parent / "mappings" / "services"
+    if not services_dir.exists():
+        return []
+    
+    services = []
+    for file_path in services_dir.glob("*.json"):
+        services.append(file_path.stem)
+    return services
+
+
+def get_service_credentials(args, service_config: Dict[str, Any]) -> Dict[str, str]:
+    """Get service credentials from environment variables or interactive input."""
+    credentials = {}
+    
+    # Check environment variables
+    env_prefix = f"{args.service.upper()}_"
+    for field in service_config["required_fields"]:
+        env_var = env_prefix + field.upper()
+        if env_var in os.environ:
+            credentials[field] = os.environ[env_var]
+    
+    # Interactive input for missing required fields
+    missing_fields = [field for field in service_config["required_fields"] if field not in credentials]
+    if missing_fields:
+        print(f"📝 Please provide the following credentials for {service_config['name']}:")
+        for field in missing_fields:
+            if 'password' in field.lower() or 'key' in field.lower() or 'secret' in field.lower():
+                import getpass
+                credentials[field] = getpass.getpass(f"  {field}: ")
+            else:
+                credentials[field] = input(f"  {field}: ")
+    
+    # Validate all required fields are present
+    missing = [field for field in service_config["required_fields"] if not credentials.get(field)]
+    if missing:
+        raise ValueError(f"Missing required credentials: {', '.join(missing)}")
+    
+    return credentials
+
+
+def get_tenant_service(dynamodb, table_name: str, tenant_id: str, service_name: str) -> Optional[Dict[str, Any]]:
+    """Get tenant service configuration from DynamoDB."""
     try:
         response = dynamodb.get_item(
             TableName=table_name,
-            Key={'tenant_id': {'S': tenant_id}}
+            Key={
+                'tenant_id': {'S': tenant_id},
+                'service_name': {'S': service_name}
+            }
         )
         return response.get('Item')
     except Exception:
         return None
 
 
-def validate_and_build_service_config(args) -> Dict[str, Any]:
-    """Validate service-specific arguments and build configuration."""
-    if args.service == 'connectwise':
-        required_args = ['connectwise_url', 'company_id', 'public_key', 'private_key', 'client_id']
-        missing = [arg for arg in required_args if not getattr(args, arg.replace('-', '_'))]
-        if missing:
-            raise ValueError(f"Missing required ConnectWise arguments: {', '.join(missing)}")
-        
-        return {
-            "api_url": args.connectwise_url,
-            "company_id": args.company_id,
-            "public_key": args.public_key,
-            "private_key": args.private_key,
-            "client_id": args.client_id
-        }
-    
-    elif args.service == 'servicenow':
-        required_args = ['servicenow_instance', 'servicenow_username', 'servicenow_password']
-        missing = [arg for arg in required_args if not getattr(args, arg)]
-        if missing:
-            raise ValueError(f"Missing required ServiceNow arguments: {', '.join(missing)}")
-        
-        return {
-            "instance_url": args.servicenow_instance,
-            "username": args.servicenow_username,
-            "password": args.servicenow_password
-        }
-    
-    elif args.service == 'salesforce':
-        required_args = ['salesforce_instance', 'salesforce_client_id', 'salesforce_client_secret', 
-                        'salesforce_username', 'salesforce_password']
-        missing = [arg for arg in required_args if not getattr(args, arg)]
-        if missing:
-            raise ValueError(f"Missing required Salesforce arguments: {', '.join(missing)}")
-        
-        config = {
-            "instance_url": args.salesforce_instance,
-            "client_id": args.salesforce_client_id,
-            "client_secret": args.salesforce_client_secret,
-            "username": args.salesforce_username,
-            "password": args.salesforce_password
-        }
-        
-        if args.salesforce_security_token:
-            config["security_token"] = args.salesforce_security_token
-        
-        return config
-    
-    else:
-        raise ValueError(f"Unsupported service: {args.service}")
-
-
-def build_service_info(args) -> Dict[str, Any]:
-    """Build service information for tenant configuration."""
-    service_info = {
-        "enabled": args.enabled
-    }
-    
-    if args.service == 'connectwise':
-        service_info["api_url"] = args.connectwise_url
-        service_info["tables"] = args.tables or ['service/tickets', 'time/entries', 'company/companies', 'company/contacts']
-    elif args.service == 'servicenow':
-        service_info["instance_url"] = args.servicenow_instance
-        service_info["tables"] = args.tables or ['incident', 'change_request', 'problem', 'user']
-    elif args.service == 'salesforce':
-        service_info["instance_url"] = args.salesforce_instance
-        service_info["tables"] = args.tables or ['Account', 'Contact', 'Opportunity', 'Case', 'Lead']
-    
-    return service_info
-
-
-def get_existing_secret(secrets, secret_name: str) -> Dict[str, Any]:
-    """Get existing secret or return empty dict."""
+def store_service_credentials(secrets, secret_name: str, service: str, credentials: Dict[str, str], company_name: str):
+    """Store service credentials in AWS Secrets Manager."""
+    # Get existing secret or create new one
     try:
         response = secrets.get_secret_value(SecretId=secret_name)
-        return json.loads(response['SecretString'])
+        existing_secret = json.loads(response['SecretString'])
     except secrets.exceptions.ResourceNotFoundException:
-        return {}
-    except Exception:
-        return {}
-
-
-def update_secret_with_service(existing_secret: Dict[str, Any], service: str, service_config: Dict[str, Any]) -> Dict[str, Any]:
-    """Update existing secret with new service configuration."""
-    updated_secret = existing_secret.copy()
-    updated_secret[service] = service_config
-    return updated_secret
-
-
-def store_secret(secrets, secret_name: str, secret_value: Dict[str, Any], company_name: str):
-    """Store or update secret in AWS Secrets Manager."""
+        existing_secret = {}
+    
+    # Update with new service credentials
+    existing_secret[service] = credentials
+    
+    # Store/update secret
     try:
         secrets.create_secret(
             Name=secret_name,
             Description=f"Multi-service credentials for {company_name}",
-            SecretString=json.dumps(secret_value)
+            SecretString=json.dumps(existing_secret)
         )
     except secrets.exceptions.ResourceExistsException:
         secrets.update_secret(
             SecretId=secret_name,
-            SecretString=json.dumps(secret_value)
+            SecretString=json.dumps(existing_secret)
         )
 
 
-def update_tenant_with_service(dynamodb, table_name: str, tenant_id: str, service: str, service_info: Dict[str, Any]):
-    """Update tenant configuration with service information."""
+def create_tenant_service_entry(dynamodb, table_name: str, tenant_id: str, service: str, service_info: Dict[str, Any], company_name: str):
+    """Create tenant service entry in DynamoDB."""
     current_time = datetime.now(timezone.utc).isoformat()
     
-    # Build update expression
-    update_expression = f"SET services.{service} = :service_info, updated_at = :updated_at"
-    expression_attribute_values = {
-        ':service_info': {'M': {k: {'S': str(v)} if isinstance(v, (str, bool)) else {'L': [{'S': item} for item in v]} for k, v in service_info.items()}},
-        ':updated_at': {'S': current_time}
+    # Create the service entry with composite key
+    service_entry = {
+        'tenant_id': {'S': tenant_id},
+        'service_name': {'S': service},
+        'company_name': {'S': company_name},
+        'enabled': {'BOOL': service_info.get('enabled', True)},
+        'created_at': {'S': current_time},
+        'updated_at': {'S': current_time}
     }
     
-    dynamodb.update_item(
+    # Add service-specific configuration (currently just enabled status)
+    # Additional service configuration is stored in secrets manager
+    
+    dynamodb.put_item(
         TableName=table_name,
-        Key={'tenant_id': {'S': tenant_id}},
-        UpdateExpression=update_expression,
-        ExpressionAttributeValues=expression_attribute_values
+        Item=service_entry
     )
 
 

@@ -174,21 +174,31 @@ python scripts/setup-tenant.py \
 # Add ConnectWise service
 python scripts/setup-service.py \
   --tenant-id "example-tenant" \
+  --company-name "Example Company" \
   --service connectwise \
-  --connectwise-url "https://api-na.myconnectwise.net" \
-  --company-id "YourCompanyID" \
-  --public-key "your-public-key" \
-  --private-key "your-private-key" \
-  --client-id "your-client-id" \
   --environment dev
 
 # Add ServiceNow service (optional)
 python scripts/setup-service.py \
   --tenant-id "example-tenant" \
+  --company-name "Example Company" \
   --service servicenow \
-  --servicenow-instance "https://yourinstance.service-now.com" \
-  --servicenow-username "your-username" \
-  --servicenow-password "your-password" \
+  --environment dev
+```
+
+The script will prompt for service-specific credentials interactively, or you can provide them via environment variables:
+```bash
+# Using environment variables for ConnectWise
+export CONNECTWISE_API_URL="https://api-na.myconnectwise.net"
+export CONNECTWISE_COMPANY_ID="YourCompanyID"
+export CONNECTWISE_PUBLIC_KEY="your-public-key"
+export CONNECTWISE_PRIVATE_KEY="your-private-key"
+export CONNECTWISE_CLIENT_ID="your-client-id"
+
+python scripts/setup-service.py \
+  --tenant-id "example-tenant" \
+  --company-name "Example Company" \
+  --service connectwise \
   --environment dev
 ```
 

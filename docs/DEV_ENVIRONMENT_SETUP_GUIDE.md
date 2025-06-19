@@ -48,12 +48,8 @@ python scripts/setup-tenant.py \
 # Add ConnectWise service to the tenant
 python scripts/setup-service.py \
   --tenant-id "test-tenant" \
+  --company-name "Test Company" \
   --service connectwise \
-  --connectwise-url "https://api-na.myconnectwise.net" \
-  --company-id "TestCompany" \
-  --public-key "test-public-key" \
-  --private-key "test-private-key" \
-  --client-id "test-client-id" \
   --environment dev \
   --region us-east-2
 ```
@@ -182,14 +178,18 @@ To test with real ConnectWise data:
 # Add real ConnectWise service to test tenant
 python scripts/setup-service.py \
   --tenant-id test-tenant \
+  --company-name "Test Company" \
   --service connectwise \
-  --connectwise-url 'https://api-na.myconnectwise.net' \
-  --company-id 'YourCompanyID' \
-  --public-key 'your-public-key' \
-  --private-key 'your-private-key' \
-  --client-id 'your-client-id' \
   --environment dev \
   --region us-east-2
+
+# The script will prompt for ConnectWise credentials interactively,
+# or you can provide them via environment variables:
+# export CONNECTWISE_API_URL='https://api-na.myconnectwise.net'
+# export CONNECTWISE_COMPANY_ID='YourCompanyID'
+# export CONNECTWISE_PUBLIC_KEY='your-public-key'
+# export CONNECTWISE_PRIVATE_KEY='your-private-key'
+# export CONNECTWISE_CLIENT_ID='your-client-id'
 ```
 
 ## Troubleshooting
@@ -268,7 +268,7 @@ After successful dev environment setup:
 
 2. **Configure Additional Services**
    ```bash
-   python scripts/setup-service.py --tenant-id "your-tenant" --service connectwise [options]
+   python scripts/setup-service.py --tenant-id "your-tenant" --company-name "Your Company" --service connectwise --environment dev
    ```
 
 3. **Monitor Pipeline Performance**
