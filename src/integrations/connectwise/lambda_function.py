@@ -22,14 +22,22 @@ from typing import Dict, List, Any, Optional
 
 # Add shared module to path
 sys.path.append('/opt/python')
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'shared'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
 
-from shared import (
-    Config, TenantConfig, ConnectWiseCredentials,
-    get_dynamodb_client, get_s3_client, get_secrets_client,
-    PipelineLogger, flatten_json, get_timestamp, get_s3_key,
-    validate_tenant_config, chunk_list, safe_get
-)
+try:
+    from shared.config import Config, TenantConfig, ConnectWiseCredentials
+    from shared.aws_clients import get_dynamodb_client, get_s3_client, get_secrets_client
+    from shared.logger import PipelineLogger
+    from shared.utils import flatten_json, get_timestamp, get_s3_key, validate_tenant_config, chunk_list, safe_get
+except ImportError as e:
+    # Fallback for local imports
+    import sys
+    import os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
+    from config import Config, TenantConfig, ConnectWiseCredentials
+    from aws_clients import get_dynamodb_client, get_s3_client, get_secrets_client
+    from logger import PipelineLogger
+    from utils import flatten_json, get_timestamp, get_s3_key, validate_tenant_config, chunk_list, safe_get
 
 # Initialize clients
 dynamodb = get_dynamodb_client()
@@ -140,56 +148,60 @@ def get_tenant_configurations(config: Config, target_tenant: Optional[str] = Non
     """Get tenant configurations from DynamoDB."""
     try:
         if target_tenant:
-            # Get specific tenant
+            # Get specific tenant - check if ConnectWise service exists
             response = dynamodb.get_item(
                 TableName=config.tenant_services_table,
-                Key={'tenant_id': {'S': target_tenant}}
+                Key={
+                    'tenant_id': {'S': target_tenant},
+                    'service': {'S': 'connectwise'}
+                }
             )
             if 'Item' not in response:
-                raise ValueError(f"Tenant {target_tenant} not found")
+                raise ValueError(f"Tenant {target_tenant} with ConnectWise service not found")
             
-            item = response['Item']
+            # Get ConnectWise credentials and config from secret
+            secret_name = f"tenant/{target_tenant}/{config.environment}"
+            credentials = get_connectwise_credentials(secret_name)
             
-            # Check if ConnectWise service is configured for this tenant
-            services = item.get('services', {}).get('M', {})
-            connectwise_service = services.get('connectwise', {}).get('M', {})
-            
-            if not connectwise_service or not connectwise_service.get('enabled', {}).get('S') == 'True':
-                return []  # ConnectWise not enabled for this tenant
-            
+            # Build tenant config from secret data
             tenant_data = {
-                'tenant_id': item['tenant_id']['S'],
-                'connectwise_url': connectwise_service.get('api_url', {}).get('S', ''),
-                'secret_name': f"tenant/{item['tenant_id']['S']}/{config.environment}",
-                'enabled': item.get('enabled', {'BOOL': True})['BOOL'],
-                'tables': [table['S'] for table in connectwise_service.get('tables', {}).get('L', [])],
+                'tenant_id': target_tenant,
+                'connectwise_url': getattr(credentials, 'api_base_url', 'https://api-na.myconnectwise.net'),
+                'secret_name': secret_name,
+                'enabled': True,
+                'tables': ['service/tickets', 'time/entries', 'company/companies', 'company/contacts'],
                 'custom_config': {}
             }
             return [validate_tenant_config(tenant_data)]
         else:
-            # Get all enabled tenants with ConnectWise service
+            # Get all tenants with ConnectWise service
             response = dynamodb.scan(
                 TableName=config.tenant_services_table,
-                FilterExpression='enabled = :enabled',
-                ExpressionAttributeValues={':enabled': {'BOOL': True}}
+                FilterExpression='service = :service',
+                ExpressionAttributeValues={':service': {'S': 'connectwise'}}
             )
             
             tenants = []
             for item in response['Items']:
-                # Check if ConnectWise service is configured and enabled
-                services = item.get('services', {}).get('M', {})
-                connectwise_service = services.get('connectwise', {}).get('M', {})
+                tenant_id = item['tenant_id']['S']
                 
-                if connectwise_service and connectwise_service.get('enabled', {}).get('S') == 'True':
+                try:
+                    # Get ConnectWise credentials and config from secret
+                    secret_name = f"tenant/{tenant_id}/{config.environment}"
+                    credentials = get_connectwise_credentials(secret_name)
+                    
                     tenant_data = {
-                        'tenant_id': item['tenant_id']['S'],
-                        'connectwise_url': connectwise_service.get('api_url', {}).get('S', ''),
-                        'secret_name': f"tenant/{item['tenant_id']['S']}/{config.environment}",
-                        'enabled': item.get('enabled', {'BOOL': True})['BOOL'],
-                        'tables': [table['S'] for table in connectwise_service.get('tables', {}).get('L', [])],
+                        'tenant_id': tenant_id,
+                        'connectwise_url': getattr(credentials, 'api_base_url', 'https://api-na.myconnectwise.net'),
+                        'secret_name': secret_name,
+                        'enabled': True,
+                        'tables': ['service/tickets', 'time/entries', 'company/companies', 'company/contacts'],
                         'custom_config': {}
                     }
                     tenants.append(validate_tenant_config(tenant_data))
+                except Exception as e:
+                    # Skip tenants with missing or invalid secrets
+                    continue
             
             return tenants
             
@@ -240,7 +252,8 @@ def get_connectwise_credentials(secret_name: str) -> ConnectWiseCredentials:
             'company_id': connectwise_data.get('company_id'),
             'public_key': connectwise_data.get('public_key'),
             'private_key': connectwise_data.get('private_key'),
-            'client_id': connectwise_data.get('client_id')
+            'client_id': connectwise_data.get('client_id'),
+            'api_base_url': connectwise_data.get('api_base_url')
         }
         
         return ConnectWiseCredentials(**credentials_data)

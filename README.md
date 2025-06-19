@@ -10,7 +10,7 @@ This pipeline uses a hybrid AWS account strategy with separate canonical transfo
 
 ### Hybrid Account Architecture
 - **Production Account (563583517998):** Dedicated account for production workloads with enhanced security
-- **Current Account (123938354448):** Development and staging environments
+- **Current Account (123938354448):** Development and staging environments only (production resources cleaned up June 2025)
 
 ### Pipeline Components
 1. **Integration-Specific Lambda Functions**: Each integration service has its own dedicated lambda function that handles authentication, API calls, and data extraction for that specific service
@@ -82,11 +82,13 @@ avesa/
 │   ├── setup-tenant-only.py    # Tenant setup script
 │   ├── setup-service.py        # Service configuration script
 │   ├── trigger-backfill.py     # Backfill management script
+│   ├── cleanup-production-resources.py # Production cleanup script
 │   └── migrate-production-data.py # Production migration script
 ├── docs/                   # Documentation
 │   ├── HYBRID_ACCOUNT_SETUP_GUIDE.md
 │   ├── BACKFILL_STRATEGY.md
 │   ├── PRODUCTION_MIGRATION_PHASE5_PHASE6_REPORT.md
+│   ├── PRODUCTION_CLEANUP_REPORT.md
 │   └── MIGRATION_CHECKLIST.md
 ├── tests/                  # Unit and integration tests
 ├── ARCHITECTURE_TRANSFORMATION_SUMMARY.md # This transformation summary
@@ -132,11 +134,12 @@ s3://{bucket}/{tenant_id}/canonical/{canonical_table}/{timestamp}.parquet
   - Lambda: `avesa-{service}-prod`
 
 ### Current Account (123938354448)
-- **Purpose:** Development and staging environments
+- **Purpose:** Development and staging environments only
+- **Status:** ✅ Production resources cleaned up (June 2025)
 - **Resources:** Environment-suffixed naming
-  - DynamoDB: `TenantServices-{env}`, `LastUpdated-{env}`
-  - S3: `data-storage-msp-{env}`
-  - Lambda: `avesa-{service}-{env}`
+  - DynamoDB: `TenantServices-{env}`, `LastUpdated-{env}` (dev/staging only)
+  - S3: `data-storage-msp-{env}` (dev/staging only)
+  - Lambda: `avesa-{service}-{env}` (dev/staging only)
 
 ## Prerequisites
 

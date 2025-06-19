@@ -87,6 +87,7 @@ class ConnectWiseCredentials(BaseModel):
     public_key: str = Field(..., description="ConnectWise public key")
     private_key: str = Field(..., description="ConnectWise private key")
     client_id: str = Field(..., description="ConnectWise client ID")
+    api_base_url: Optional[str] = Field(default=None, description="ConnectWise API base URL")
     
     def get_auth_header(self) -> str:
         """Get authorization header value."""
