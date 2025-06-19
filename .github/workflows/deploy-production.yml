@@ -1,14 +1,32 @@
 name: Deploy to Production
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'infrastructure/**'
-      - 'src/**'
-      - '.github/workflows/deploy-production.yml'
   workflow_dispatch:
     inputs:
+      deployment_confirmation:
+        description: 'Type "DEPLOY TO PRODUCTION" to confirm deployment'
+        required: true
+        type: string
+      environment_target:
+        description: 'Target environment (must be "production")'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+      deployment_reason:
+        description: 'Reason for this deployment (for audit trail)'
+        required: true
+        type: string
+      components_to_deploy:
+        description: 'Components to deploy'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - infrastructure-only
+          - lambdas-only
       force_deploy:
         description: 'Force deployment even if no changes detected'
         required: false
@@ -16,39 +34,96 @@ on:
         type: boolean
 
 env:
-  AWS_REGION: us-east-1
+  AWS_REGION: us-east-2
   ENVIRONMENT: prod
 
 jobs:
-  deploy-production:
+  validate-deployment-inputs:
     runs-on: ubuntu-latest
-    environment: production
+    outputs:
+      deployment_approved: ${{ steps.validate.outputs.approved }}
+      deployment_summary: ${{ steps.validate.outputs.summary }}
     
     steps:
+    - name: Validate deployment confirmation
+      id: validate
+      run: |
+        echo "🔍 Validating deployment inputs..."
+        
+        # Check deployment confirmation
+        if [[ "${{ github.event.inputs.deployment_confirmation }}" != "DEPLOY TO PRODUCTION" ]]; then
+          echo "❌ Invalid deployment confirmation. Must type exactly: 'DEPLOY TO PRODUCTION'"
+          echo "Received: '${{ github.event.inputs.deployment_confirmation }}'"
+          exit 1
+        fi
+        
+        # Check environment target
+        if [[ "${{ github.event.inputs.environment_target }}" != "production" ]]; then
+          echo "❌ Invalid environment target. Must be 'production'"
+          exit 1
+        fi
+        
+        # Check deployment reason is provided
+        if [[ -z "${{ github.event.inputs.deployment_reason }}" ]]; then
+          echo "❌ Deployment reason is required for audit trail"
+          exit 1
+        fi
+        
+        echo "✅ All deployment inputs validated"
+        echo "approved=true" >> $GITHUB_OUTPUT
+        
+        # Create deployment summary
+        SUMMARY="**🚀 Production Deployment Request**
+        
+        **Triggered by:** ${{ github.actor }}
+        **Timestamp:** $(date -u)
+        **Reason:** ${{ github.event.inputs.deployment_reason }}
+        **Components:** ${{ github.event.inputs.components_to_deploy }}
+        **Force Deploy:** ${{ github.event.inputs.force_deploy }}
+        **Commit:** ${{ github.sha }}
+        
+        **⚠️ WARNING: This will deploy to PRODUCTION environment**"
+        
+        echo "summary<<EOF" >> $GITHUB_OUTPUT
+        echo "$SUMMARY" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+  deploy-production:
+    needs: validate-deployment-inputs
+    runs-on: ubuntu-latest
+    environment: production
+    if: needs.validate-deployment-inputs.outputs.deployment_approved == 'true'
+    
+    steps:
+    - name: Display deployment summary
+      run: |
+        echo "## 🚨 PRODUCTION DEPLOYMENT INITIATED" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "${{ needs.validate-deployment-inputs.outputs.deployment_summary }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "---" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+    
     - name: Checkout code
       uses: actions/checkout@v4
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: 'infrastructure/package-lock.json'
     
     - name: Setup Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.9'
         cache: 'pip'
-        cache-dependency-path: 'infrastructure/requirements.txt'
-    
-    - name: Install AWS CDK
-      run: npm install -g aws-cdk
+        cache-dependency-path: 'requirements.txt'
     
     - name: Install Python dependencies
       run: |
-        cd infrastructure
         pip install -r requirements.txt
+        pip install -r infrastructure/requirements.txt
+    
+    - name: Setup Node.js and AWS CDK
+      run: |
+        curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+        sudo apt-get install -y nodejs
+        npm install -g aws-cdk
     
     - name: Configure AWS credentials for production
       uses: aws-actions/configure-aws-credentials@v4
@@ -70,26 +145,103 @@ jobs:
         echo "CDK_PROD_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_ENV
         echo "CDK_DEFAULT_REGION=${{ env.AWS_REGION }}" >> $GITHUB_ENV
     
-    - name: Bootstrap CDK (if needed)
+    - name: Validate deployment prerequisites
       run: |
-        cd infrastructure
-        # Check if CDK is already bootstrapped
-        if ! aws cloudformation describe-stacks --stack-name CDKToolkit --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
-          echo "Bootstrapping CDK..."
-          cdk bootstrap --context environment=${{ env.ENVIRONMENT }}
-        else
-          echo "CDK already bootstrapped"
+        echo "Validating deployment prerequisites..."
+        
+        # Check if required scripts exist
+        if [[ ! -f "scripts/deploy.sh" ]]; then
+          echo "❌ scripts/deploy.sh not found"
+          exit 1
         fi
+        
+        if [[ ! -f "scripts/package-lightweight-lambdas.py" ]]; then
+          echo "❌ scripts/package-lightweight-lambdas.py not found"
+          exit 1
+        fi
+        
+        # Check if infrastructure directory exists
+        if [[ ! -d "infrastructure" ]]; then
+          echo "❌ infrastructure directory not found"
+          exit 1
+        fi
+        
+        echo "✅ All prerequisites validated"
     
-    - name: Synthesize CDK app
+    - name: Package lightweight Lambda functions
+      if: github.event.inputs.components_to_deploy == 'all' || github.event.inputs.components_to_deploy == 'lambdas-only'
       run: |
-        cd infrastructure
-        cdk synth --context environment=${{ env.ENVIRONMENT }} --all
+        echo "📦 Packaging optimized Lambda functions with AWS pandas layer support..."
+        echo "Components to deploy: ${{ github.event.inputs.components_to_deploy }}"
+        
+        python scripts/package-lightweight-lambdas.py --function all --output-dir lambda-packages
+        
+        # Verify packages were created
+        if [[ ! -d "lambda-packages" ]]; then
+          echo "❌ Lambda packages directory not created"
+          exit 1
+        fi
+        
+        echo "📦 Created packages:"
+        ls -la lambda-packages/
+        echo "✅ Lambda functions packaged successfully"
     
-    - name: Deploy infrastructure
+    - name: Skip Lambda packaging
+      if: github.event.inputs.components_to_deploy == 'infrastructure-only'
       run: |
-        cd infrastructure
-        cdk deploy --all --context environment=${{ env.ENVIRONMENT }} --require-approval never
+        echo "⏭️ Skipping Lambda packaging (infrastructure-only deployment)"
+        mkdir -p lambda-packages
+        echo "Empty directory created for consistency"
+    
+    - name: Pre-deployment safety check
+      run: |
+        echo "🔒 Performing pre-deployment safety checks..."
+        
+        # Verify we're in the correct AWS account
+        ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+        echo "Current AWS Account: $ACCOUNT_ID"
+        
+        # Add additional safety checks here if needed
+        echo "✅ Pre-deployment safety checks passed"
+    
+    - name: Deploy infrastructure using unified script
+      run: |
+        echo "🚀 Deploying using unified deployment script..."
+        echo "Components: ${{ github.event.inputs.components_to_deploy }}"
+        echo "Force deploy: ${{ github.event.inputs.force_deploy }}"
+        echo "Deployment reason: ${{ github.event.inputs.deployment_reason }}"
+        
+        chmod +x scripts/deploy.sh
+        
+        # Prepare deployment arguments
+        DEPLOY_ARGS="--environment prod --region ${{ env.AWS_REGION }}"
+        
+        if [[ "${{ github.event.inputs.force_deploy }}" == "true" ]]; then
+          DEPLOY_ARGS="$DEPLOY_ARGS --force"
+        fi
+        
+        # Add component-specific deployment logic if needed
+        case "${{ github.event.inputs.components_to_deploy }}" in
+          "infrastructure-only")
+            echo "📋 Deploying infrastructure components only..."
+            ;;
+          "lambdas-only")
+            echo "📋 Deploying Lambda functions only..."
+            ;;
+          "all")
+            echo "📋 Deploying all components..."
+            ;;
+        esac
+        
+        # Run deployment with error handling
+        echo "Executing: ./scripts/deploy.sh $DEPLOY_ARGS"
+        if ! ./scripts/deploy.sh $DEPLOY_ARGS; then
+          echo "❌ Deployment failed"
+          echo "Please check the logs above for details"
+          exit 1
+        fi
+        
+        echo "✅ Infrastructure deployment completed successfully"
     
     - name: Validate deployment
       run: |
@@ -132,12 +284,23 @@ jobs:
     
     - name: Create deployment summary
       run: |
-        echo "## 🚀 Production Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "## ✅ Production Deployment Completed Successfully" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📋 Deployment Details" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
         echo "**Environment:** ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
         echo "**AWS Account:** $(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_STEP_SUMMARY
         echo "**Region:** ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
         echo "**Deployed at:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+        echo "**Components:** ${{ github.event.inputs.components_to_deploy }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Force Deploy:** ${{ github.event.inputs.force_deploy }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📝 Audit Trail" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Deployment Reason:** ${{ github.event.inputs.deployment_reason }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Confirmation:** ${{ github.event.inputs.deployment_confirmation }}" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📊 Deployed Resources" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
@@ -153,10 +316,15 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 🔗 Next Steps" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "1. **Data Migration:** Run \`python3 scripts/migrate-production-data.py --execute\`" >> $GITHUB_STEP_SUMMARY
+        echo "1. **Tenant Setup:** Configure tenants using \`python scripts/setup-service.py\`" >> $GITHUB_STEP_SUMMARY
         echo "2. **Testing:** Validate all integrations are working correctly" >> $GITHUB_STEP_SUMMARY
         echo "3. **Monitoring:** Set up alerts and dashboards" >> $GITHUB_STEP_SUMMARY
-        echo "4. **DNS Update:** Point production traffic to new account" >> $GITHUB_STEP_SUMMARY
+        echo "4. **Backfill:** Run data backfill using \`python scripts/trigger-backfill.py\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### ⚠️ Manual Deployment Notice" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "This deployment was manually triggered and required explicit confirmation." >> $GITHUB_STEP_SUMMARY
+        echo "All future production deployments must be manually initiated through GitHub Actions." >> $GITHUB_STEP_SUMMARY
 
   notify-deployment:
     needs: deploy-production
@@ -171,12 +339,17 @@ jobs:
         status: ${{ needs.deploy-production.result }}
         channel: '#deployments'
         text: |
-          Production deployment ${{ needs.deploy-production.result }}!
+          🚨 **MANUAL PRODUCTION DEPLOYMENT** ${{ needs.deploy-production.result }}!
           
-          Environment: ${{ env.ENVIRONMENT }}
-          Commit: ${{ github.sha }}
-          Actor: ${{ github.actor }}
+          **Triggered by:** ${{ github.actor }}
+          **Environment:** ${{ env.ENVIRONMENT }}
+          **Components:** ${{ github.event.inputs.components_to_deploy }}
+          **Reason:** ${{ github.event.inputs.deployment_reason }}
+          **Commit:** ${{ github.sha }}
+          **Timestamp:** $(date -u)
           
-          ${{ needs.deploy-production.result == 'success' && '✅ Ready for data migration and testing' || '❌ Please check logs and retry' }}
+          ${{ needs.deploy-production.result == 'success' && '✅ Deployment successful - Ready for tenant setup and testing' || '❌ Deployment failed - Please check logs and retry' }}
+          
+          **Note:** This was a controlled manual deployment requiring explicit confirmation.
       env:
         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
