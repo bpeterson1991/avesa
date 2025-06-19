@@ -112,7 +112,10 @@ jobs:
       with:
         python-version: '3.9'
         cache: 'pip'
-        cache-dependency-path: 'requirements.txt'
+        cache-dependency-path: |
+          requirements.txt
+          infrastructure/requirements.txt
+          src/backfill/requirements.txt
     
     - name: Install Python dependencies
       run: |
@@ -326,30 +329,30 @@ jobs:
         echo "This deployment was manually triggered and required explicit confirmation." >> $GITHUB_STEP_SUMMARY
         echo "All future production deployments must be manually initiated through GitHub Actions." >> $GITHUB_STEP_SUMMARY
 
-  notify-deployment:
-    needs: deploy-production
-    runs-on: ubuntu-latest
-    if: always()
-    
-    steps:
-    - name: Notify deployment status
-      uses: 8398a7/action-slack@v3
-      if: always()
-      with:
-        status: ${{ needs.deploy-production.result }}
-        channel: '#deployments'
-        text: |
-          🚨 **MANUAL PRODUCTION DEPLOYMENT** ${{ needs.deploy-production.result }}!
-          
-          **Triggered by:** ${{ github.actor }}
-          **Environment:** ${{ env.ENVIRONMENT }}
-          **Components:** ${{ github.event.inputs.components_to_deploy }}
-          **Reason:** ${{ github.event.inputs.deployment_reason }}
-          **Commit:** ${{ github.sha }}
-          **Timestamp:** $(date -u)
-          
-          ${{ needs.deploy-production.result == 'success' && '✅ Deployment successful - Ready for tenant setup and testing' || '❌ Deployment failed - Please check logs and retry' }}
-          
-          **Note:** This was a controlled manual deployment requiring explicit confirmation.
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+  # notify-deployment:
+  #   needs: deploy-production
+  #   runs-on: ubuntu-latest
+  #   if: always()
+  #
+  #   steps:
+  #   - name: Notify deployment status
+  #     uses: 8398a7/action-slack@v3
+  #     if: always()
+  #     with:
+  #       status: ${{ needs.deploy-production.result }}
+  #       channel: '#deployments'
+  #       text: |
+  #         🚨 **MANUAL PRODUCTION DEPLOYMENT** ${{ needs.deploy-production.result }}!
+  #
+  #         **Triggered by:** ${{ github.actor }}
+  #         **Environment:** ${{ env.ENVIRONMENT }}
+  #         **Components:** ${{ github.event.inputs.components_to_deploy }}
+  #         **Reason:** ${{ github.event.inputs.deployment_reason }}
+  #         **Commit:** ${{ github.sha }}
+  #         **Timestamp:** $(date -u)
+  #
+  #         ${{ needs.deploy-production.result == 'success' && '✅ Deployment successful - Ready for tenant setup and testing' || '❌ Deployment failed - Please check logs and retry' }}
+  #
+  #         **Note:** This was a controlled manual deployment requiring explicit confirmation.
+  #     env:
+  #       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
