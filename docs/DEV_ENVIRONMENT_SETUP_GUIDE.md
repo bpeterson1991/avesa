@@ -35,17 +35,10 @@ This script will:
 - ✅ Set up EventBridge scheduling rules
 - ✅ Configure IAM roles and policies
 
-### 2. Create a Test Tenant
+### 2. Create a Test Tenant with Service
 
 ```bash
-# Create a test tenant
-python scripts/setup-tenant.py \
-  --tenant-id "test-tenant" \
-  --company-name "Test Company" \
-  --environment dev \
-  --region us-east-2
-
-# Add ConnectWise service to the tenant
+# Add ConnectWise service to a tenant (creates tenant automatically if it doesn't exist)
 python scripts/setup-service.py \
   --tenant-id "test-tenant" \
   --company-name "Test Company" \
@@ -55,9 +48,11 @@ python scripts/setup-service.py \
 ```
 
 This will:
-- ✅ Create a test tenant in DynamoDB
+- ✅ Create a test tenant in DynamoDB (if it doesn't exist)
 - ✅ Store test ConnectWise credentials in Secrets Manager
 - ✅ Configure the tenant for ConnectWise data ingestion
+
+**Note:** Tenants are created automatically when adding their first service. The DynamoDB schema uses a composite key (`tenant_id` + `service_name`), so tenant creation is handled seamlessly during service setup.
 
 ### 3. Test the Pipeline
 
@@ -261,14 +256,15 @@ cdk deploy --context environment=dev --all --region us-east-2
 
 After successful dev environment setup:
 
-1. **Create Additional Tenants**
+1. **Create Additional Tenants with Services**
    ```bash
-   python scripts/setup-tenant.py --tenant-id "your-tenant" --company-name "Your Company" --environment dev
+   # Creates tenant automatically when adding the first service
+   python scripts/setup-service.py --tenant-id "your-tenant" --company-name "Your Company" --service connectwise --environment dev
    ```
 
-2. **Configure Additional Services**
+2. **Add Additional Services to Existing Tenants**
    ```bash
-   python scripts/setup-service.py --tenant-id "your-tenant" --company-name "Your Company" --service connectwise --environment dev
+   python scripts/setup-service.py --tenant-id "your-tenant" --company-name "Your Company" --service servicenow --environment dev
    ```
 
 3. **Monitor Pipeline Performance**

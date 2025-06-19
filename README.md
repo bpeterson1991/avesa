@@ -86,8 +86,7 @@ avesa/
 │   ├── deploy-dev-staging.sh    # Deploy to dev/staging environments
 │   ├── deploy-lambda-functions.py # Update Lambda functions
 │   ├── test-lambda-functions.py # Test pipeline functionality
-│   ├── setup-tenant.py         # Add new tenants
-│   ├── setup-service.py        # Add services to tenants
+│   ├── setup-service.py        # Add services to tenants (creates tenant if needed)
 │   └── trigger-backfill.py     # Run backfill operations
 ├── docs/                   # Documentation
 │   ├── BACKFILL_STRATEGY.md
@@ -161,17 +160,9 @@ pip install -r requirements.txt
 ./scripts/deploy-dev-staging.sh --environment dev
 ```
 
-3. Create a tenant:
+3. Add services to tenants (creates tenant automatically):
 ```bash
-python scripts/setup-tenant.py \
-  --tenant-id "example-tenant" \
-  --company-name "Example Company" \
-  --environment dev
-```
-
-4. Add services to the tenant:
-```bash
-# Add ConnectWise service
+# Add ConnectWise service (creates tenant if it doesn't exist)
 python scripts/setup-service.py \
   --tenant-id "example-tenant" \
   --company-name "Example Company" \
@@ -202,7 +193,7 @@ python scripts/setup-service.py \
   --environment dev
 ```
 
-5. Test the pipeline:
+4. Test the pipeline:
 ```bash
 aws lambda invoke \
   --function-name avesa-connectwise-ingestion-dev \
