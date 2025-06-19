@@ -27,24 +27,32 @@ import sys
 from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 
-# Add shared module to path
-sys.path.append('/opt/python')
+# Add AWS layer and shared module to path
+sys.path.append('/opt/python/lib/python3.9/site-packages')
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
 
 try:
-    from shared.config import Config, TenantConfig, ConnectWiseCredentials
-    from shared.aws_clients import get_dynamodb_client, get_s3_client, get_secrets_client
-    from shared.logger import PipelineLogger
-    from shared.utils import flatten_json, get_timestamp, get_s3_key, validate_tenant_config, chunk_list, safe_get
-except ImportError as e:
-    # Fallback for local imports
-    import sys
-    import os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
-    from config import Config, TenantConfig, ConnectWiseCredentials
+    # Try direct imports (Lambda package has modules in root)
+    from config_simple import Config, TenantConfig, ConnectWiseCredentials
     from aws_clients import get_dynamodb_client, get_s3_client, get_secrets_client
     from logger import PipelineLogger
     from utils import flatten_json, get_timestamp, get_s3_key, validate_tenant_config, chunk_list, safe_get
+except ImportError as e:
+    # Fallback for shared directory imports (development environment)
+    try:
+        from shared.config_simple import Config, TenantConfig, ConnectWiseCredentials
+        from shared.aws_clients import get_dynamodb_client, get_s3_client, get_secrets_client
+        from shared.logger import PipelineLogger
+        from shared.utils import flatten_json, get_timestamp, get_s3_key, validate_tenant_config, chunk_list, safe_get
+    except ImportError:
+        # Final fallback with path manipulation
+        import sys
+        import os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
+        from config_simple import Config, TenantConfig, ConnectWiseCredentials
+        from aws_clients import get_dynamodb_client, get_s3_client, get_secrets_client
+        from logger import PipelineLogger
+        from utils import flatten_json, get_timestamp, get_s3_key, validate_tenant_config, chunk_list, safe_get
 
 # Initialize clients
 dynamodb = get_dynamodb_client()

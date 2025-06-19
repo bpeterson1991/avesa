@@ -222,16 +222,26 @@ class DataPipelineStack(Stack):
 
     def _create_connectwise_lambda(self, memory: int, timeout: int) -> _lambda.Function:
         """Create Lambda function for ConnectWise data ingestion."""
+        # AWS Pandas Layer ARN for us-east-2
+        pandas_layer_arn = "arn:aws:lambda:us-east-2:336392948345:layer:AWSSDKPandas-Python39:13"
+        
         function = _lambda.Function(
             self,
             "ConnectWiseLambda",
             function_name=f"avesa-connectwise-ingestion-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="lambda_function.lambda_handler",
-            code=_lambda.Code.from_asset("../src/integrations/connectwise"),
+            code=_lambda.Code.from_asset("../lambda-packages/connectwise-ingestion.zip"),
             role=self.lambda_role,
             memory_size=memory,
             timeout=Duration.seconds(timeout),
+            layers=[
+                _lambda.LayerVersion.from_layer_version_arn(
+                    self,
+                    "ConnectWisePandasLayer",
+                    pandas_layer_arn
+                )
+            ],
             environment={
                 "BUCKET_NAME": self.data_bucket.bucket_name,
                 "TENANT_SERVICES_TABLE": self.tenant_services_table.table_name,
@@ -248,6 +258,9 @@ class DataPipelineStack(Stack):
         canonical_tables = ["tickets", "time_entries", "companies", "contacts"]
         lambdas = {}
         
+        # AWS Pandas Layer ARN for us-east-2
+        pandas_layer_arn = "arn:aws:lambda:us-east-2:336392948345:layer:AWSSDKPandas-Python39:13"
+        
         for table in canonical_tables:
             function = _lambda.Function(
                 self,
@@ -255,10 +268,17 @@ class DataPipelineStack(Stack):
                 function_name=f"avesa-canonical-transform-{table.replace('_', '-')}-{self.env_name}",
                 runtime=_lambda.Runtime.PYTHON_3_9,
                 handler="lambda_function.lambda_handler",
-                code=_lambda.Code.from_asset("../src/canonical_transform"),
+                code=_lambda.Code.from_asset("../lambda-packages/canonical-transform.zip"),
                 role=self.lambda_role,
                 memory_size=memory,
                 timeout=Duration.seconds(timeout),
+                layers=[
+                    _lambda.LayerVersion.from_layer_version_arn(
+                        self,
+                        f"CanonicalTransform{table.title().replace('_', '')}PandasLayer",
+                        pandas_layer_arn
+                    )
+                ],
                 environment={
                     "BUCKET_NAME": self.data_bucket.bucket_name,
                     "TENANT_SERVICES_TABLE": self.tenant_services_table.table_name,

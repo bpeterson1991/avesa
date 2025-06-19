@@ -3,10 +3,13 @@ Utility functions for the ConnectWise data pipeline.
 """
 
 import json
-import pandas as pd
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
-from .config import TenantConfig
+
+try:
+    from .config_simple import TenantConfig
+except ImportError:
+    from config_simple import TenantConfig
 
 
 def flatten_json(data: Dict[str, Any], parent_key: str = '', sep: str = '__') -> Dict[str, Any]:
@@ -175,7 +178,7 @@ def calculate_data_freshness(last_updated: Optional[str]) -> Optional[int]:
         return None
 
 
-def detect_schema_changes(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict[str, List[str]]:
+def detect_schema_changes(old_df, new_df) -> Dict[str, List[str]]:
     """
     Detect schema changes between DataFrames.
     
@@ -186,6 +189,11 @@ def detect_schema_changes(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict[st
     Returns:
         Dictionary with added and removed columns
     """
+    try:
+        import pandas as pd
+    except ImportError:
+        raise ImportError("pandas is required for schema change detection. Ensure AWS pandas layer is available.")
+    
     old_columns = set(old_df.columns)
     new_columns = set(new_df.columns)
     
@@ -195,7 +203,7 @@ def detect_schema_changes(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict[st
     }
 
 
-def validate_data_quality(df: pd.DataFrame, table_name: str) -> Dict[str, Any]:
+def validate_data_quality(df, table_name: str) -> Dict[str, Any]:
     """
     Perform basic data quality checks.
     
@@ -206,6 +214,11 @@ def validate_data_quality(df: pd.DataFrame, table_name: str) -> Dict[str, Any]:
     Returns:
         Data quality report
     """
+    try:
+        import pandas as pd
+    except ImportError:
+        raise ImportError("pandas is required for data quality validation. Ensure AWS pandas layer is available.")
+    
     report = {
         'table_name': table_name,
         'record_count': len(df),

@@ -159,7 +159,7 @@ def deploy_canonical_functions(lambda_client, environment: str, region: str, dry
 
 
 def create_deployment_package(source_dir: str, package_name: str) -> str:
-    """Create deployment package with dependencies."""
+    """Create deployment package with dependencies and shared modules."""
     print(f"  📝 Creating deployment package for {package_name}...")
     
     # Create temporary directory
@@ -167,39 +167,34 @@ def create_deployment_package(source_dir: str, package_name: str) -> str:
         package_dir = os.path.join(temp_dir, "package")
         os.makedirs(package_dir)
         
-        # Copy source files
+        # Copy only the main Lambda function file (not bundled dependencies)
         source_path = Path(source_dir)
-        for file_path in source_path.rglob("*.py"):
-            relative_path = file_path.relative_to(source_path)
-            dest_path = Path(package_dir) / relative_path
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(file_path, dest_path)
+        lambda_file = source_path / "lambda_function.py"
+        if lambda_file.exists():
+            shutil.copy2(lambda_file, os.path.join(package_dir, "lambda_function.py"))
+            print(f"    ✓ Copied lambda_function.py")
+        else:
+            raise FileNotFoundError(f"lambda_function.py not found in {source_dir}")
+        
+        # Copy any other .py files that are not part of bundled dependencies
+        for py_file in source_path.glob("*.py"):
+            if py_file.name != "lambda_function.py":
+                # Skip if it's part of a bundled dependency directory
+                if not any(dep_dir in str(py_file) for dep_dir in ['boto3', 'pandas', 'pyarrow', 'dateutil']):
+                    shutil.copy2(py_file, os.path.join(package_dir, py_file.name))
+                    print(f"    ✓ Copied {py_file.name}")
         
         # Copy shared modules
         shared_dir = Path("src/shared")
         shared_dest = Path(package_dir) / "shared"
-        if not shared_dest.exists():
+        if shared_dir.exists():
             shutil.copytree(shared_dir, shared_dest)
+            print(f"    ✓ Copied shared modules")
+        else:
+            raise FileNotFoundError(f"Shared modules directory not found: {shared_dir}")
         
-        # Install dependencies
-        requirements_file = source_path / "requirements.txt"
-        if requirements_file.exists():
-            print(f"  📦 Installing dependencies from {requirements_file}...")
-            subprocess.run([
-                sys.executable, "-m", "pip", "install",
-                "-r", str(requirements_file),
-                "-t", package_dir,
-                "--no-deps"  # Don't install dependencies of dependencies to avoid conflicts
-            ], check=True, capture_output=True)
-            
-            # Install specific versions to avoid conflicts
-            subprocess.run([
-                sys.executable, "-m", "pip", "install",
-                "pydantic==2.5.0",
-                "pydantic-core==2.14.0",
-                "-t", package_dir,
-                "--no-deps"
-            ], check=True, capture_output=True)
+        # Install clean dependencies
+        install_clean_dependencies(package_dir)
         
         # Create zip file
         zip_path = f"/tmp/{package_name}-deployment.zip"
@@ -210,8 +205,50 @@ def create_deployment_package(source_dir: str, package_name: str) -> str:
                     arc_name = os.path.relpath(file_path, package_dir)
                     zip_file.write(file_path, arc_name)
         
-        print(f"  ✅ Created deployment package: {zip_path}")
+        # Get package size
+        size_mb = os.path.getsize(zip_path) / (1024 * 1024)
+        print(f"  ✅ Created deployment package: {zip_path} ({size_mb:.1f} MB)")
         return zip_path
+
+
+def install_clean_dependencies(package_dir: str):
+    """Install clean dependencies without conflicts."""
+    print(f"    📦 Installing clean dependencies...")
+    
+    # Create a requirements.txt with the essential dependencies
+    requirements_content = """
+boto3>=1.26.0
+botocore>=1.29.0
+pandas>=2.0.0
+pyarrow>=10.0.0
+pydantic>=2.5.0
+pydantic-core>=2.14.0
+requests>=2.28.0
+python-dateutil>=2.8.0
+""".strip()
+    
+    requirements_file = os.path.join(package_dir, "requirements.txt")
+    with open(requirements_file, 'w') as f:
+        f.write(requirements_content)
+    
+    # Install dependencies
+    try:
+        subprocess.run([
+            sys.executable, "-m", "pip", "install",
+            "-r", requirements_file,
+            "-t", package_dir,
+            "--no-deps",  # Don't install dependencies of dependencies
+            "--upgrade"
+        ], check=True, capture_output=True, text=True)
+        
+        print(f"      ✓ Installed dependencies")
+        
+        # Remove the requirements.txt from the package
+        os.remove(requirements_file)
+        
+    except subprocess.CalledProcessError as e:
+        print(f"      ❌ Failed to install dependencies: {e}")
+        raise
 
 
 if __name__ == '__main__':
