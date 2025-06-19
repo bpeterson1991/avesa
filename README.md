@@ -9,8 +9,8 @@ A multi-tenant data ingestion and transformation pipeline supporting 30+ integra
 This pipeline uses a hybrid AWS account strategy with separate canonical transform functions:
 
 ### Hybrid Account Architecture
-- **Production Account (563583517998):** Dedicated account for production workloads with enhanced security
-- **Current Account (123938354448):** Development and staging environments only (production resources cleaned up June 2025)
+- **Production Account (YOUR_PRODUCTION_ACCOUNT_ID):** Dedicated account for production workloads with enhanced security
+- **Development Account (YOUR_DEV_ACCOUNT_ID):** Development and staging environments only (production resources cleaned up June 2025)
 
 ### Pipeline Components
 1. **Integration-Specific Lambda Functions**: Each integration service has its own dedicated lambda function that handles authentication, API calls, and data extraction for that specific service
@@ -122,14 +122,14 @@ s3://{bucket}/{tenant_id}/canonical/{canonical_table}/{timestamp}.parquet
 
 ## Environment Architecture
 
-### Production Account (563583517998)
+### Production Account (YOUR_PRODUCTION_ACCOUNT_ID)
 - **Purpose:** Production workloads with enhanced security
 - **Resources:** Clean naming without environment suffixes
   - DynamoDB: `TenantServices`, `LastUpdated`
   - S3: `data-storage-msp-prod`
   - Lambda: `avesa-{service}-prod`
 
-### Current Account (123938354448)
+### Development Account (YOUR_DEV_ACCOUNT_ID)
 - **Purpose:** Development and staging environments only
 - **Status:** ✅ Production resources cleaned up (June 2025)
 - **Resources:** Environment-suffixed naming
@@ -199,23 +199,23 @@ aws lambda invoke \
 
 ## Environment Variables
 
-### Production Account (563583517998)
+### Production Account (YOUR_PRODUCTION_ACCOUNT_ID)
 - `BUCKET_NAME`: `data-storage-msp-prod`
 - `TENANT_SERVICES_TABLE`: `TenantServices`
 - `LAST_UPDATED_TABLE`: `LastUpdated`
-- `CDK_PROD_ACCOUNT`: `563583517998`
+- `CDK_PROD_ACCOUNT`: `YOUR_PRODUCTION_ACCOUNT_ID`
 
-### Development/Staging (Current Account)
+### Development/Staging (YOUR_DEV_ACCOUNT_ID)
 - `BUCKET_NAME`: `data-storage-msp-{env}`
 - `TENANT_SERVICES_TABLE`: `TenantServices-{env}`
 - `LAST_UPDATED_TABLE`: `LastUpdated-{env}`
-- `CDK_DEFAULT_ACCOUNT`: Current account ID
+- `CDK_DEFAULT_ACCOUNT`: `YOUR_DEV_ACCOUNT_ID`
 
 ## Key Features
 
 ### 🏗️ Hybrid Account Architecture
 - **Production Isolation**: Dedicated AWS account for production workloads
-- **Development Simplicity**: Dev/staging remain in current account
+- **Development Simplicity**: Dev/staging remain in development account
 - **Security Enhancement**: Complete separation of production data
 - **Compliance Ready**: Foundation for SOC 2, ISO 27001 certifications
 
@@ -241,8 +241,8 @@ aws lambda invoke \
 
 ### Production Monitoring
 - **CloudWatch Dashboard**: `AVESA-DataPipeline-PROD`
-- **Cross-Account Monitoring**: Monitor production from current account
-- **SNS Alerts**: `arn:aws:sns:us-east-2:563583517998:avesa-alerts-prod`
+- **Cross-Account Monitoring**: Monitor production from development account
+- **SNS Alerts**: `arn:aws:sns:us-east-2:YOUR_PRODUCTION_ACCOUNT_ID:avesa-alerts-prod`
 - **Function-Level Metrics**: Individual metrics per canonical transform
 
 ### Development Monitoring

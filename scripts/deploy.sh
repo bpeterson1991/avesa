@@ -51,7 +51,7 @@ usage() {
     echo "  $0 -e staging -p my-aws-profile"
     echo ""
     echo "Environment-specific defaults:"
-    echo "  dev/staging: Uses default profile or specified profile"
+    echo "  dev/staging: Uses AdministratorAccess-123938354448 profile or specified profile"
     echo "  prod:        Uses 'avesa-production' profile (can be overridden)"
 }
 
@@ -103,7 +103,7 @@ case "$ENVIRONMENT" in
         RESOURCE_SUFFIX=""
         ;;
     *)
-        AWS_PROFILE="${PROFILE:-default}"
+        AWS_PROFILE="${PROFILE:-AdministratorAccess-123938354448}"
         ACCOUNT_VAR="CDK_DEFAULT_ACCOUNT"
         RESOURCE_SUFFIX="-${ENVIRONMENT}"
         ;;
@@ -169,7 +169,7 @@ set_environment() {
             echo ""
             echo "Or set up cross-account role access:"
             echo "  aws configure set role_arn arn:aws:iam::PROD_ACCOUNT_ID:role/DeploymentRole --profile $AWS_PROFILE"
-            echo "  aws configure set source_profile default --profile $AWS_PROFILE"
+            echo "  aws configure set source_profile AdministratorAccess-123938354448 --profile $AWS_PROFILE"
         fi
         exit 1
     fi

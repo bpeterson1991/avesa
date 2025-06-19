@@ -25,7 +25,7 @@ def main():
     parser.add_argument('--chunk-size-days', type=int, default=30, help='Chunk size in days (default: 30)')
     parser.add_argument('--environment', default='dev', choices=['dev', 'staging', 'prod'],
                        help='Environment (default: dev)')
-    parser.add_argument('--region', default='us-east-1', help='AWS region (default: us-east-1)')
+    parser.add_argument('--region', default='us-east-2', help='AWS region (default: us-east-2)')
     parser.add_argument('--dry-run', action='store_true', help='Show what would be triggered without actually doing it')
     parser.add_argument('--auto-detect', action='store_true', help='Auto-detect services needing backfill')
     

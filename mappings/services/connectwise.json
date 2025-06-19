@@ -2,7 +2,7 @@
   "name": "ConnectWise",
   "auth_mode": "api_key",
   "required_fields": [
-    "api_url",
+    "api_base_url",
     "company_id",
     "public_key",
     "private_key",

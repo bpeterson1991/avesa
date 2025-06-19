@@ -72,7 +72,7 @@ Examples:
 The script automatically configures environment-specific settings:
 
 #### Development/Staging
-- **AWS Profile**: Uses `default` or specified profile
+- **AWS Profile**: Uses `AdministratorAccess-YOUR_DEV_ACCOUNT_ID` or specified profile
 - **Account Variable**: `CDK_DEFAULT_ACCOUNT`
 - **Resource Naming**: Resources suffixed with `-{environment}`
 - **S3 Bucket**: `data-storage-msp-{environment}`
@@ -126,10 +126,10 @@ The unified script follows this consistent workflow for all environments:
 
 ### Development/Staging
 
-For development and staging environments, configure your default AWS profile:
+For development and staging environments, configure the AdministratorAccess-YOUR_DEV_ACCOUNT_ID AWS profile:
 
 ```bash
-aws configure
+aws configure --profile AdministratorAccess-YOUR_DEV_ACCOUNT_ID
 ```
 
 Or use a specific profile:
@@ -150,8 +150,8 @@ aws configure --profile avesa-production
 Or set up cross-account role access:
 
 ```bash
-aws configure set role_arn arn:aws:iam::PROD_ACCOUNT_ID:role/DeploymentRole --profile avesa-production
-aws configure set source_profile default --profile avesa-production
+aws configure set role_arn arn:aws:iam::YOUR_PRODUCTION_ACCOUNT_ID:role/DeploymentRole --profile avesa-production
+aws configure set source_profile AdministratorAccess-YOUR_DEV_ACCOUNT_ID --profile avesa-production
 ```
 
 ## Post-Deployment Setup
@@ -163,7 +163,7 @@ After successful deployment, set up tenants using the service setup script:
 #### Setup ConnectWise Service for a Tenant
 ```bash
 python scripts/setup-service.py \
-  --tenant-id "example-tenant" \
+  --tenant-id "{tenant-id}" \
   --company-name "Example Company" \
   --service connectwise \
   --environment dev
@@ -185,7 +185,7 @@ export CONNECTWISE_CLIENT_ID="your-client-id"
 export CONNECTWISE_API_BASE_URL="https://api-na.myconnectwise.net"
 
 python scripts/setup-service.py \
-  --tenant-id "example-tenant" \
+  --tenant-id "{tenant-id}" \
   --company-name "Example Company" \
   --service connectwise \
   --environment dev
@@ -199,14 +199,15 @@ Test the deployed pipeline:
 # Test Lambda function
 aws lambda invoke \
   --function-name avesa-connectwise-ingestion-dev \
-  --payload '{"tenant_id": "example-tenant"}' \
-  response.json
+  --payload '{"tenant_id": "{tenant-id}"}' \
+  response.json \
+  --profile AdministratorAccess-YOUR_DEV_ACCOUNT_ID
 
 # Monitor logs
-aws logs tail /aws/lambda/avesa-connectwise-ingestion-dev --follow
+aws logs tail /aws/lambda/avesa-connectwise-ingestion-dev --follow --profile AdministratorAccess-YOUR_DEV_ACCOUNT_ID
 
 # Check S3 data
-aws s3 ls s3://data-storage-msp-dev/ --recursive
+aws s3 ls s3://data-storage-msp-dev/ --recursive --profile AdministratorAccess-YOUR_DEV_ACCOUNT_ID
 ```
 
 ## Monitoring and Troubleshooting
@@ -223,18 +224,19 @@ After deployment, monitor your pipeline using:
 
 ```bash
 # View tenant configurations
-aws dynamodb scan --table-name TenantServices-dev
+aws dynamodb scan --table-name TenantServices-dev --profile AdministratorAccess-YOUR_DEV_ACCOUNT_ID
 
 # Get specific tenant service configuration
 aws dynamodb get-item \
   --table-name TenantServices-dev \
-  --key '{"tenant_id":{"S":"example-tenant"},"service":{"S":"connectwise"}}'
+  --key '{"tenant_id":{"S":"{tenant-id}"},"service":{"S":"connectwise"}}' \
+  --profile AdministratorAccess-YOUR_DEV_ACCOUNT_ID
 
 # List tenant secrets
-aws secretsmanager list-secrets --filters Key=name,Values=tenant/
+aws secretsmanager list-secrets --filters Key=name,Values={tenant-id}/ --profile AdministratorAccess-YOUR_DEV_ACCOUNT_ID
 
 # Check deployment status
-aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE
+aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE --profile AdministratorAccess-YOUR_DEV_ACCOUNT_ID
 ```
 
 ### Troubleshooting

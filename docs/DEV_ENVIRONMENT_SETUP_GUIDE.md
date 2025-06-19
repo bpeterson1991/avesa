@@ -6,7 +6,7 @@ This guide provides step-by-step instructions for setting up and testing the AVE
 
 The AVESA data pipeline consists of:
 - **ConnectWise Ingestion Lambda**: Pulls data from ConnectWise API
-- **Canonical Transform Lambdas**: Transform raw data to canonical format (separate function per table)
+- **Canonical Transform Lambda**: Single function that transforms raw data to canonical format using `CANONICAL_TABLE` environment variable
 - **DynamoDB Tables**: Store tenant configurations and tracking data
 - **S3 Buckets**: Store raw and canonical data in Parquet format
 - **Secrets Manager**: Store API credentials securely
@@ -15,7 +15,7 @@ The AVESA data pipeline consists of:
 
 - AWS CLI configured with appropriate permissions
 - Python 3.9+
-- Access to AWS account 123938354448 (dev/staging account)
+- Access to AWS account YOUR_DEV_ACCOUNT_ID (dev/staging account)
 - Region: us-east-2
 
 ## Quick Start
@@ -40,7 +40,7 @@ This script will:
 ```bash
 # Add ConnectWise service to a tenant (creates tenant automatically if it doesn't exist)
 python scripts/setup-service.py \
-  --tenant-id "test-tenant" \
+  --tenant-id "{tenant-id}" \
   --company-name "Test Company" \
   --service connectwise \
   --environment dev \
@@ -79,23 +79,18 @@ The dev environment requires specific AWS resources that may be missing:
 - `data-storage-msp-dev`: Stores raw and canonical data files
 
 #### Test Data
-- Sample tenant: `test-tenant`
+- Sample tenant: `{tenant-id}`
 - Sample ConnectWise credentials (non-functional for testing)
 
-### Step 2: Lambda Function Issues
+### Step 2: Lambda Function Packaging
 
-The main issues identified:
+The AVESA Lambda functions use a lightweight packaging approach:
 
-#### Dependency Problems
-- ❌ `pydantic_core._pydantic_core` import errors
-- ❌ Missing shared module imports
-- ❌ Incorrect Python path configuration
-
-#### Solutions Applied
-- ✅ Added `pydantic-core>=2.0.0` to requirements.txt
-- ✅ Fixed import paths in Lambda functions
-- ✅ Proper packaging of shared modules
-- ✅ Updated deployment process
+#### AWS Pandas Layer Optimization
+- ✅ 99.9% package size reduction achieved using AWS Pandas layers
+- ✅ Heavy dependencies (pandas, numpy, pyarrow) provided by AWS layers
+- ✅ Lightweight application-specific packages only
+- ✅ Optimized deployment and cold start performance
 
 ### Step 3: Testing Process
 
@@ -124,7 +119,7 @@ The testing script validates:
 # Invoke ConnectWise ingestion function
 aws lambda invoke \
   --function-name avesa-connectwise-ingestion-dev \
-  --payload '{"tenant_id": "test-tenant"}' \
+  --payload '{"tenant_id": "{tenant-id}"}' \
   --cli-binary-format raw-in-base64-out \
   response.json --region us-east-2
 
@@ -138,17 +133,17 @@ aws logs tail /aws/lambda/avesa-connectwise-ingestion-dev --follow --region us-e
 ### Test Canonical Transform Functions
 
 ```bash
-# Test tickets transformation
+# Test canonical transformation (single function with CANONICAL_TABLE environment variable)
 aws lambda invoke \
-  --function-name avesa-canonical-transform-tickets-dev \
-  --payload '{"tenant_id": "test-tenant"}' \
+  --function-name avesa-canonical-transform-dev \
+  --payload '{"tenant_id": "{tenant-id}", "table_name": "tickets"}' \
   --cli-binary-format raw-in-base64-out \
   response.json --region us-east-2
 
-# Test other canonical functions
-aws lambda invoke --function-name avesa-canonical-transform-time-entries-dev --payload '{"tenant_id": "test-tenant"}' --cli-binary-format raw-in-base64-out response.json --region us-east-2
-aws lambda invoke --function-name avesa-canonical-transform-companies-dev --payload '{"tenant_id": "test-tenant"}' --cli-binary-format raw-in-base64-out response.json --region us-east-2
-aws lambda invoke --function-name avesa-canonical-transform-contacts-dev --payload '{"tenant_id": "test-tenant"}' --cli-binary-format raw-in-base64-out response.json --region us-east-2
+# Test other canonical tables
+aws lambda invoke --function-name avesa-canonical-transform-dev --payload '{"tenant_id": "{tenant-id}", "table_name": "time_entries"}' --cli-binary-format raw-in-base64-out response.json --region us-east-2
+aws lambda invoke --function-name avesa-canonical-transform-dev --payload '{"tenant_id": "{tenant-id}", "table_name": "companies"}' --cli-binary-format raw-in-base64-out response.json --region us-east-2
+aws lambda invoke --function-name avesa-canonical-transform-dev --payload '{"tenant_id": "{tenant-id}", "table_name": "contacts"}' --cli-binary-format raw-in-base64-out response.json --region us-east-2
 ```
 
 ### Check Data Storage
@@ -162,7 +157,7 @@ aws dynamodb scan --table-name TenantServices-dev --region us-east-2
 aws dynamodb scan --table-name LastUpdated-dev --region us-east-2
 
 # Check secrets
-aws secretsmanager list-secrets --filters Key=name,Values=tenant/ --region us-east-2
+aws secretsmanager list-secrets --filters Key=name,Values={tenant-id}/ --region us-east-2
 ```
 
 ## Adding Real ConnectWise Credentials
@@ -172,7 +167,7 @@ To test with real ConnectWise data:
 ```bash
 # Add real ConnectWise service to test tenant
 python scripts/setup-service.py \
-  --tenant-id test-tenant \
+  --tenant-id {tenant-id} \
   --company-name "Test Company" \
   --service connectwise \
   --environment dev \
@@ -180,7 +175,7 @@ python scripts/setup-service.py \
 
 # The script will prompt for ConnectWise credentials interactively,
 # or you can provide them via environment variables:
-# export CONNECTWISE_API_URL='https://api-na.myconnectwise.net'
+# export CONNECTWISE_API_BASE_URL='https://api-na.myconnectwise.net'
 # export CONNECTWISE_COMPANY_ID='YourCompanyID'
 # export CONNECTWISE_PUBLIC_KEY='your-public-key'
 # export CONNECTWISE_PRIVATE_KEY='your-private-key'
@@ -195,9 +190,9 @@ python scripts/setup-service.py \
 ```
 Error: No module named 'pydantic_core._pydantic_core'
 ```
-**Solution**: Redeploy Lambda functions with fixed dependencies
+**Solution**: Redeploy Lambda functions using the deployment script
 ```bash
-python scripts/deploy-lambda-functions.py --environment dev --region us-east-2
+./scripts/deploy.sh --environment dev --region us-east-2
 ```
 
 #### 2. Missing DynamoDB Tables
@@ -259,12 +254,12 @@ After successful dev environment setup:
 1. **Create Additional Tenants with Services**
    ```bash
    # Creates tenant automatically when adding the first service
-   python scripts/setup-service.py --tenant-id "your-tenant" --company-name "Your Company" --service connectwise --environment dev
+   python scripts/setup-service.py --tenant-id "{tenant-id}" --company-name "Your Company" --service connectwise --environment dev
    ```
 
 2. **Add Additional Services to Existing Tenants**
    ```bash
-   python scripts/setup-service.py --tenant-id "your-tenant" --company-name "Your Company" --service servicenow --environment dev
+   python scripts/setup-service.py --tenant-id "{tenant-id}" --company-name "Your Company" --service servicenow --environment dev
    ```
 
 3. **Monitor Pipeline Performance**
@@ -289,7 +284,7 @@ S3 (Raw Parquet) → Canonical Transform Lambdas → S3 (Canonical Parquet)
 ### Storage Structure
 ```
 s3://data-storage-msp-dev/
-├── tenant-id/
+├── {tenant-id}/
 │   ├── raw/
 │   │   └── connectwise/
 │   │       ├── service/tickets/

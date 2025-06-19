@@ -1,5 +1,4 @@
 # AWS Pandas layer provides: pandas, numpy, pyarrow, boto3, botocore,
 # requests, python-dateutil, pytz, s3transfer, urllib3, jmespath
 # Only include application-specific dependencies not provided by AWS layer
-pydantic>=2.5.0
-pydantic-core>=2.14.0
+# Note: Using config_simple.py eliminates need for pydantic dependencies
