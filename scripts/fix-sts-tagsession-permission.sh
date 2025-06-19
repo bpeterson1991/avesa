@@ -253,6 +253,18 @@ create_updated_assume_role_policy() {
           "sts:ExternalId": "${EXTERNAL_ID}"
         }
       }
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "sts:TagSession"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": ["us-east-1", "us-east-2", "us-west-1", "us-west-2"]
+        }
+      }
     }
   ]
 }

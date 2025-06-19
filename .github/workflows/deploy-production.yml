@@ -129,14 +129,41 @@ jobs:
         npm install -g aws-cdk
     
     - name: Configure AWS credentials for production
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
-        aws-region: ${{ env.AWS_REGION }}
-        role-to-assume: ${{ secrets.AWS_PROD_DEPLOYMENT_ROLE_ARN }}
-        role-duration-seconds: 3600
-        role-session-name: GitHubActions-ProductionDeployment
+      run: |
+        # Set up AWS credentials without session tagging to avoid sts:TagSession errors
+        echo "Setting up AWS credentials using manual role assumption..."
+        
+        # Configure base credentials
+        aws configure set aws_access_key_id "${{ secrets.AWS_ACCESS_KEY_ID_PROD }}"
+        aws configure set aws_secret_access_key "${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}"
+        aws configure set region "${{ env.AWS_REGION }}"
+        
+        # Test basic access
+        echo "Testing basic AWS access..."
+        aws sts get-caller-identity
+        
+        # Assume role manually without session tagging
+        echo "Assuming production role..."
+        ROLE_CREDS=$(aws sts assume-role \
+          --role-arn "${{ secrets.AWS_PROD_DEPLOYMENT_ROLE_ARN }}" \
+          --role-session-name "GitHubActions-ProductionDeployment-$(date +%s)" \
+          --external-id "avesa-github-actions-2024" \
+          --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+          --output text)
+        
+        # Extract credentials
+        AWS_ACCESS_KEY_ID=$(echo $ROLE_CREDS | cut -d' ' -f1)
+        AWS_SECRET_ACCESS_KEY=$(echo $ROLE_CREDS | cut -d' ' -f2)
+        AWS_SESSION_TOKEN=$(echo $ROLE_CREDS | cut -d' ' -f3)
+        
+        # Set environment variables for subsequent steps
+        echo "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" >> $GITHUB_ENV
+        echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" >> $GITHUB_ENV
+        echo "AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN" >> $GITHUB_ENV
+        
+        # Verify assumed role
+        echo "Verifying assumed role identity..."
+        aws sts get-caller-identity
     
     - name: Verify AWS credentials
       run: |
