@@ -85,9 +85,14 @@ avesa/
 │   ├── setup-service.py        # Add services to tenants (creates tenant if needed)
 │   └── trigger-backfill.py     # Run backfill operations
 ├── docs/                   # Documentation
+│   ├── AWS_CREDENTIALS_SETUP_GUIDE.md  # AWS credentials for GitHub Actions
 │   ├── BACKFILL_STRATEGY.md
 │   ├── DEPLOYMENT.md
-│   └── DEV_ENVIRONMENT_SETUP_GUIDE.md
+│   ├── DEPLOYMENT_VERIFICATION.md
+│   ├── DEV_ENVIRONMENT_SETUP_GUIDE.md
+│   ├── GITHUB_SECRETS_QUICK_SETUP.md   # Quick GitHub secrets setup
+│   ├── MANUAL_DEPLOYMENT_GUIDE.md
+│   └── PROD_ENVIRONMENT_SETUP_GUIDE.md
 └── tests/                  # Unit and integration tests
 ```
 
@@ -143,6 +148,19 @@ s3://{bucket}/{tenant_id}/canonical/{canonical_table}/{timestamp}.parquet
 - Python 3.9+
 - Node.js 18+ (for CDK)
 - AWS CDK CLI installed (`npm install -g aws-cdk`)
+
+### GitHub Actions Deployment Setup
+
+For production deployments via GitHub Actions, you'll need to configure AWS credentials as repository secrets:
+
+- **Quick Setup**: See [`GITHUB_SECRETS_QUICK_SETUP.md`](docs/GITHUB_SECRETS_QUICK_SETUP.md) for rapid configuration
+- **Complete Guide**: See [`AWS_CREDENTIALS_SETUP_GUIDE.md`](docs/AWS_CREDENTIALS_SETUP_GUIDE.md) for detailed setup and security best practices
+- **Manual Deployment**: See [`MANUAL_DEPLOYMENT_GUIDE.md`](docs/MANUAL_DEPLOYMENT_GUIDE.md) for production deployment procedures
+
+**Required GitHub Secrets:**
+- `AWS_ACCESS_KEY_ID_PROD` - AWS Access Key ID for production deployment
+- `AWS_SECRET_ACCESS_KEY_PROD` - AWS Secret Access Key for production deployment
+- `AWS_PROD_DEPLOYMENT_ROLE_ARN` - Production deployment role ARN (for cross-account setup)
 
 ## Quick Start
 
