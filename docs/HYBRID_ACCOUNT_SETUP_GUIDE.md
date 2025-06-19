@@ -237,7 +237,7 @@ export CDK_DEFAULT_REGION=us-east-1
 1. **Trigger a full pipeline run:**
    ```bash
    # Add a test tenant
-   python3 scripts/setup-tenant-only.py \
+   python3 scripts/setup-tenant.py \
      --tenant-id test-prod \
      --company-name "Test Production Company" \
      --environment prod \

@@ -274,7 +274,7 @@ For ongoing operations, use these available scripts:
 - [`scripts/deploy-prod.sh`](../scripts/deploy-prod.sh) - Deploy infrastructure updates
 - [`scripts/test-lambda-functions.py`](../scripts/test-lambda-functions.py) - Test Lambda functions
 - [`scripts/deploy-lambda-functions.py`](../scripts/deploy-lambda-functions.py) - Deploy function updates
-- [`scripts/setup-tenant-only.py`](../scripts/setup-tenant-only.py) - Set up new tenants
+- [`scripts/setup-tenant.py`](../scripts/setup-tenant.py) - Set up new tenants
 - [`scripts/setup-service.py`](../scripts/setup-service.py) - Add services to tenants
 - [`scripts/trigger-backfill.py`](../scripts/trigger-backfill.py) - Trigger backfill operations
 

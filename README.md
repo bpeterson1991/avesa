@@ -79,11 +79,14 @@ avesa/
 │   ├── companies.json      # Canonical companies table mapping
 │   └── contacts.json       # Canonical contacts table mapping
 ├── scripts/                # Deployment and utility scripts
-│   ├── setup-tenant-only.py    # Tenant setup script
-│   ├── setup-service.py        # Service configuration script
-│   ├── trigger-backfill.py     # Backfill management script
-│   ├── cleanup-production-resources.py # Production cleanup script
-│   └── migrate-production-data.py # Production migration script
+│   ├── deploy-prod.sh           # Deploy to production account
+│   ├── deploy-dev-staging.sh    # Deploy to dev/staging environments
+│   ├── deploy-lambda-functions.py # Update Lambda functions
+│   ├── test-lambda-functions.py # Test pipeline functionality
+│   ├── setup-tenant.py         # Add new tenants
+│   ├── setup-service.py        # Add services to tenants
+│   ├── trigger-backfill.py     # Run backfill operations
+│   └── setup-dev-environment.py # Set up dev environment
 ├── docs/                   # Documentation
 │   ├── HYBRID_ACCOUNT_SETUP_GUIDE.md
 │   ├── BACKFILL_STRATEGY.md
@@ -157,12 +160,12 @@ pip install -r requirements.txt
 
 2. Deploy infrastructure:
 ```bash
-./scripts/deploy.sh --environment dev
+./scripts/deploy-dev-staging.sh --environment dev
 ```
 
 3. Create a tenant:
 ```bash
-python scripts/setup-tenant-only.py \
+python scripts/setup-tenant.py \
   --tenant-id "example-tenant" \
   --company-name "Example Company" \
   --environment dev

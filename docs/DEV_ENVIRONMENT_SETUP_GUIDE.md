@@ -254,7 +254,7 @@ After successful dev environment setup:
 
 1. **Create Additional Tenants**
    ```bash
-   python scripts/setup-tenant-only.py --tenant-id "your-tenant" --company-name "Your Company" --environment dev
+   python scripts/setup-tenant.py --tenant-id "your-tenant" --company-name "Your Company" --environment dev
    ```
 
 2. **Configure Additional Services**

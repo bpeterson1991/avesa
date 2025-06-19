@@ -15,15 +15,19 @@ The following one-time migration and setup scripts have been removed:
 - `scripts/cleanup-production-resources.py` - Production resources cleanup script (cleanup completed)
 - `scripts/check-migration-readiness.sh` - Migration readiness check script (migration completed)
 - `scripts/validate-production-setup.sh` - Production setup validation script (validation completed)
+- `scripts/setup-tenant.py` - Legacy tenant setup script (removed in favor of cleaner naming)
+
+### ✅ Script Renaming (Final Cleanup)
+- `scripts/setup-tenant-only.py` → `scripts/setup-tenant.py` - Renamed to cleaner primary tenant setup script
+- `scripts/deploy.sh` → `scripts/deploy-dev-staging.sh` - Renamed to clarify it's for dev/staging environments only
 
 ### ✅ Retained Scripts (Ongoing Operations)
 - `scripts/deploy-prod.sh` - Deploy infrastructure updates to production
-- `scripts/deploy.sh` - Deploy infrastructure to dev/staging environments
+- `scripts/deploy-dev-staging.sh` - Deploy infrastructure to dev/staging environments
 - `scripts/deploy-lambda-functions.py` - Deploy Lambda function updates
 - `scripts/test-lambda-functions.py` - Test Lambda functions across environments
-- `scripts/setup-tenant-only.py` - Set up new tenants (ongoing tenant management)
+- `scripts/setup-tenant.py` - Set up new tenants (ongoing tenant management)
 - `scripts/setup-service.py` - Add services to existing tenants (ongoing service management)
-- `scripts/setup-tenant.py` - Legacy tenant setup (kept for compatibility)
 - `scripts/trigger-backfill.py` - Trigger backfill operations (ongoing operations)
 - `scripts/setup-dev-environment.py` - Set up development environment (ongoing dev setup)
 
@@ -55,6 +59,28 @@ The following files may still contain references to deleted scripts and should b
 ### Current Operations
 All ongoing operations now use the retained scripts listed above. The hybrid AWS account strategy is fully implemented and operational.
 
+## Final Script List
+
+The repository now has a clean, intuitive set of scripts with clear naming:
+
+### ✅ Production Deployment
+- `scripts/deploy-prod.sh` - Deploy to production account (563583517998)
+
+### ✅ Development/Staging Deployment
+- `scripts/deploy-dev-staging.sh` - Deploy to dev/staging environments (123938354448)
+
+### ✅ Lambda Function Management
+- `scripts/deploy-lambda-functions.py` - Update Lambda functions across environments
+- `scripts/test-lambda-functions.py` - Test pipeline functionality
+
+### ✅ Tenant & Service Management
+- `scripts/setup-tenant.py` - Add new tenants (renamed from setup-tenant-only for clarity)
+- `scripts/setup-service.py` - Add services to existing tenants
+
+### ✅ Operations & Maintenance
+- `scripts/trigger-backfill.py` - Run backfill operations
+- `scripts/setup-dev-environment.py` - Set up development environment
+
 ## Cleanup Benefits
 
 1. **Reduced Complexity** - Removed scripts that are no longer needed
@@ -62,6 +88,7 @@ All ongoing operations now use the retained scripts listed above. The hybrid AWS
 3. **Reduced Maintenance** - Fewer scripts to maintain and update
 4. **Cleaner Repository** - Easier to understand what scripts are available for current use
 5. **Historical Documentation** - Migration process is documented for future reference
+6. **Intuitive Naming** - Script names clearly indicate their purpose and target environment
 
 ## Next Steps
 

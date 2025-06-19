@@ -20,7 +20,7 @@ pip install -r requirements.txt
 
 2. **Deploy to development environment:**
 ```bash
-./scripts/deploy.sh --environment dev
+./scripts/deploy-dev-staging.sh --environment dev
 ```
 
 3. **Setup a tenant:**

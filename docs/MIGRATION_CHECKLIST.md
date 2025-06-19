@@ -100,7 +100,7 @@ python3 scripts/test-lambda-functions.py --environment prod --region us-east-2
 python3 scripts/deploy-lambda-functions.py --environment prod --region us-east-2
 
 # Set up new tenants
-python3 scripts/setup-tenant-only.py --tenant-id "new-tenant" --company-name "Company Name" --environment prod
+python3 scripts/setup-tenant.py --tenant-id "new-tenant" --company-name "Company Name" --environment prod
 
 # Add services to tenants
 python3 scripts/setup-service.py --tenant-id "tenant-id" --service connectwise --environment prod
@@ -172,7 +172,7 @@ aws s3 ls s3://data-storage-msp-prod --profile avesa-production
 - [`scripts/deploy-prod.sh`](../scripts/deploy-prod.sh) - Deploy infrastructure updates
 - [`scripts/test-lambda-functions.py`](../scripts/test-lambda-functions.py) - Test Lambda functions
 - [`scripts/deploy-lambda-functions.py`](../scripts/deploy-lambda-functions.py) - Deploy function updates
-- [`scripts/setup-tenant-only.py`](../scripts/setup-tenant-only.py) - Set up new tenants
+- [`scripts/setup-tenant.py`](../scripts/setup-tenant.py) - Set up new tenants
 - [`scripts/setup-service.py`](../scripts/setup-service.py) - Add services to tenants
 - [`scripts/trigger-backfill.py`](../scripts/trigger-backfill.py) - Trigger backfill operations
 - [`scripts/setup-dev-environment.py`](../scripts/setup-dev-environment.py) - Set up dev environment
