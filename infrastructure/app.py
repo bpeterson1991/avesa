@@ -85,6 +85,18 @@ if env_config.get("enable_optimization", False):
         last_updated_table_name="LastUpdated" if environment == "prod" else f"LastUpdated-{environment}"
     )
 
-# Skip other stacks for now - focus on performance deployment
+# Deploy backfill stack for testing
+backfill_stack = BackfillStack(
+    app,
+    f"AVESABackfill-{environment}",
+    env=env,
+    environment=environment,
+    data_bucket_name=env_config["bucket_name"],
+    tenant_services_table_name="TenantServices" if environment == "prod" else f"TenantServices-{environment}",
+    lambda_memory=env_config["lambda_memory"],
+    lambda_timeout=env_config["lambda_timeout"]
+)
+
+# Skip other stacks for now - focus on performance and backfill deployment
 
 app.synth()
