@@ -258,9 +258,9 @@ def find_raw_data_files(config: Config, tenant_id: str, canonical_table: str, lo
         if 'Contents' not in response:
             return []
         
-        # Return recent files (last 24 hours worth)
+        # Return recent files (last 72 hours worth for production stability)
         recent_files = []
-        cutoff_time = datetime.now(timezone.utc).timestamp() - (24 * 60 * 60)  # 24 hours ago
+        cutoff_time = datetime.now(timezone.utc).timestamp() - (72 * 60 * 60)  # 72 hours ago
         
         for obj in response['Contents']:
             if obj['LastModified'].timestamp() > cutoff_time:

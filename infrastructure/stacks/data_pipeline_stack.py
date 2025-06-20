@@ -123,7 +123,7 @@ class DataPipelineStack(Stack):
         including service status, credential references, and audit timestamps.
         """
         # Remove environment suffix for production (hybrid account approach)
-        table_name = "TenantServices" if self.env_name == "prod" else f"TenantServices-{self.env_name}"
+        table_name = f"TenantServices-{self.env_name}"
         
         table = dynamodb.Table(
             self,
@@ -155,7 +155,7 @@ class DataPipelineStack(Stack):
         to enable efficient incremental data processing.
         """
         # Remove environment suffix for production (hybrid account approach)
-        table_name = "LastUpdated" if self.env_name == "prod" else f"LastUpdated-{self.env_name}"
+        table_name = f"LastUpdated-{self.env_name}"
         
         table = dynamodb.Table(
             self,

@@ -1,0 +1,166 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "generated": "2025-06-20T06:02:35-07:00",
+    "description": "DynamoDB table schemas and data structures for all environments",
+    "environments": {
+      "dev": {
+        "account": "123938354448",
+        "region": "us-east-2",
+        "suffix": "-dev"
+      },
+      "staging": {
+        "account": "123938354448", 
+        "region": "us-east-2",
+        "suffix": "-staging"
+      },
+      "prod": {
+        "account": "563583517998",
+        "region": "us-east-2",
+        "suffix": "-prod"
+      }
+    }
+  },
+  "naming_issues": {
+    "production_tables_missing_suffix": [
+      "BackfillJobs",
+      "LastUpdated", 
+      "TenantServices"
+    ],
+    "production_tables_correct_naming": [
+      "ChunkProgress-prod",
+      "ProcessingJobs-prod"
+    ]
+  },
+  "schema_issues": {
+    "TenantServices": {
+      "issue": "Production table missing critical 'secret_name' field",
+      "dev_schema": {
+        "tenant_id": "S",
+        "service": "S",
+        "enabled": "BOOL",
+        "secret_name": "S"
+      },
+      "prod_schema": {
+        "tenant_id": "S",
+        "service": "S", 
+        "enabled": "BOOL",
+        "updated_at": "S",
+        "created_at": "S",
+        "company_name": "S"
+      },
+      "required_fix": "Add secret_name field to production data"
+    }
+  },
+  "table_schemas": {
+    "BackfillJobs": {
+      "description": "Tracks backfill job execution and status",
+      "key_schema": {
+        "partition_key": "job_id",
+        "sort_key": null
+      },
+      "attribute_definitions": [
+        {
+          "attribute_name": "job_id",
+          "attribute_type": "S"
+        }
+      ],
+      "billing_mode": "PAY_PER_REQUEST",
+      "warm_throughput": {
+        "read_units_per_second": 12000,
+        "write_units_per_second": 4000
+      }
+    },
+    "ChunkProgress": {
+      "description": "Tracks processing progress for data chunks",
+      "key_schema": {
+        "partition_key": "chunk_id",
+        "sort_key": null
+      },
+      "attribute_definitions": [
+        {
+          "attribute_name": "chunk_id",
+          "attribute_type": "S"
+        }
+      ],
+      "billing_mode": "PAY_PER_REQUEST",
+      "warm_throughput": {
+        "read_units_per_second": 12000,
+        "write_units_per_second": 4000
+      }
+    },
+    "LastUpdated": {
+      "description": "Stores last update timestamps for tenant tables",
+      "key_schema": {
+        "partition_key": "tenant_id",
+        "sort_key": "table_name"
+      },
+      "attribute_definitions": [
+        {
+          "attribute_name": "tenant_id",
+          "attribute_type": "S"
+        },
+        {
+          "attribute_name": "table_name",
+          "attribute_type": "S"
+        }
+      ],
+      "billing_mode": "PAY_PER_REQUEST",
+      "warm_throughput": {
+        "read_units_per_second": 12000,
+        "write_units_per_second": 4000
+      }
+    },
+    "ProcessingJobs": {
+      "description": "Manages data processing job queue and status",
+      "key_schema": {
+        "partition_key": "job_id",
+        "sort_key": null
+      },
+      "attribute_definitions": [
+        {
+          "attribute_name": "job_id",
+          "attribute_type": "S"
+        }
+      ],
+      "billing_mode": "PAY_PER_REQUEST",
+      "warm_throughput": {
+        "read_units_per_second": 12000,
+        "write_units_per_second": 4000
+      }
+    },
+    "TenantServices": {
+      "description": "Maps tenants to their configured services and endpoints",
+      "key_schema": {
+        "partition_key": "tenant_id",
+        "sort_key": "service"
+      },
+      "attribute_definitions": [
+        {
+          "attribute_name": "tenant_id",
+          "attribute_type": "S"
+        },
+        {
+          "attribute_name": "service",
+          "attribute_type": "S"
+        }
+      ],
+      "billing_mode": "PAY_PER_REQUEST",
+      "warm_throughput": {
+        "read_units_per_second": 12000,
+        "write_units_per_second": 4000
+      },
+      "required_attributes": {
+        "tenant_id": "S",
+        "service": "S",
+        "enabled": "BOOL",
+        "secret_name": "S"
+      },
+      "optional_attributes": {
+        "updated_at": "S",
+        "created_at": "S", 
+        "company_name": "S"
+      }
+    }
+  }
+}

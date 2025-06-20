@@ -1,0 +1,33 @@
+{
+  "environments": {
+    "dev": {
+      "account": "123938354448",
+      "region": "us-east-2",
+      "bucket_name": "data-storage-msp-dev",
+      "table_suffix": "-dev",
+      "lambda_memory": 512,
+      "lambda_timeout": 300
+    },
+    "staging": {
+      "account": "123938354448",
+      "region": "us-east-2",
+      "bucket_name": "data-storage-msp-staging",
+      "table_suffix": "-staging",
+      "lambda_memory": 1024,
+      "lambda_timeout": 600
+    },
+    "prod": {
+      "account": "563583517998",
+      "region": "us-east-2",
+      "bucket_name": "data-storage-msp-prod",
+      "table_suffix": "-prod",
+      "lambda_memory": 1024,
+      "lambda_timeout": 900
+    }
+  },
+  "deployment_profiles": {
+    "avesa-dev": "dev",
+    "avesa-staging": "staging",
+    "avesa-production": "prod"
+  }
+}
