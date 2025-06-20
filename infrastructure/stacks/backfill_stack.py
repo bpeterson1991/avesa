@@ -146,13 +146,16 @@ class BackfillStack(Stack):
 
     def _create_backfill_lambda(self, memory: int, timeout: int) -> _lambda.Function:
         """Create Lambda function for backfill processing."""
+        # Note: Original backfill implementation has been archived
+        # This creates a placeholder function that references the archived code
+        # TODO: Implement optimized backfill using the new architecture
         function = _lambda.Function(
             self,
             "BackfillLambda",
             function_name=f"avesa-backfill-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="lambda_function.lambda_handler",
-            code=_lambda.Code.from_asset("../src/backfill"),
+            code=_lambda.Code.from_asset("../archive/src/backfill"),
             role=self.backfill_lambda_role,
             memory_size=memory,
             timeout=Duration.seconds(timeout),
@@ -170,13 +173,16 @@ class BackfillStack(Stack):
 
     def _create_backfill_initiator_lambda(self) -> _lambda.Function:
         """Create Lambda function for initiating backfills."""
+        # Note: Original backfill implementation has been archived
+        # This creates a placeholder function that references the archived code
+        # TODO: Implement optimized backfill using the new architecture
         function = _lambda.Function(
             self,
             "BackfillInitiatorLambda",
             function_name=f"avesa-backfill-initiator-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="initiator.lambda_handler",
-            code=_lambda.Code.from_asset("../src/backfill"),
+            code=_lambda.Code.from_asset("../archive/src/backfill"),
             role=self.backfill_lambda_role,
             memory_size=512,
             timeout=Duration.seconds(300),

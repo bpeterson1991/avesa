@@ -96,9 +96,24 @@ class ConnectWiseCredentials:
     def get_auth_header(self) -> str:
         """Get authorization header value."""
         import base64
+        
+        # Validate required fields
+        if not self.company_id:
+            raise ValueError("company_id is required for ConnectWise authentication")
+        if not self.public_key:
+            raise ValueError("public_key is required for ConnectWise authentication")
+        if not self.private_key:
+            raise ValueError("private_key is required for ConnectWise authentication")
+        
+        # Build auth string in ConnectWise format: company_id+public_key:private_key
         auth_string = f"{self.company_id}+{self.public_key}:{self.private_key}"
-        encoded_auth = base64.b64encode(auth_string.encode()).decode()
-        return f"Basic {encoded_auth}"
+        
+        # Encode to base64
+        try:
+            encoded_auth = base64.b64encode(auth_string.encode('utf-8')).decode('utf-8')
+            return f"Basic {encoded_auth}"
+        except Exception as e:
+            raise ValueError(f"Failed to encode authentication string: {str(e)}")
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ConnectWiseCredentials":

@@ -160,6 +160,12 @@ Thumbs.db
 *.temp
 response.json
 
+# Debugging and one-time scripts
+check_*.py
+debug_*.py
+test_*_discovery.py
+revert_*.py
+
 # Secrets and credentials
 secrets.json
 credentials.json

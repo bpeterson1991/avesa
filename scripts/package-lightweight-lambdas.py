@@ -55,11 +55,11 @@ def package_connectwise_function(output_dir: str):
     """Package ConnectWise ingestion function."""
     print("📦 Packaging ConnectWise ingestion function...")
     
-    source_dir = "src/integrations/connectwise"
-    package_name = "connectwise-ingestion"
-    
-    zip_path = create_lightweight_package(source_dir, package_name, output_dir)
-    print(f"  ✅ Created package: {zip_path}")
+    # Note: ConnectWise integration has been archived
+    # This function is kept for compatibility but will skip packaging
+    print("  ⚠️  ConnectWise integration has been archived - skipping package creation")
+    print("  ℹ️  Use the optimized processors instead: src/optimized/")
+    return None
 
 
 def package_canonical_function(output_dir: str):
@@ -134,6 +134,22 @@ def create_lightweight_package(source_dir: str, package_name: str, output_dir: s
         else:
             raise FileNotFoundError(f"Shared modules directory not found: {shared_dir}")
         
+        # Copy mapping files to package for reliable access across all environments
+        print(f"  📁 Copying mapping files...")
+        mappings_dir = Path("mappings")
+        if mappings_dir.exists():
+            package_mappings_dir = os.path.join(package_dir, "mappings")
+            shutil.copytree(mappings_dir, package_mappings_dir)
+            print(f"    ✓ Copied entire mappings directory to package")
+            
+            # Count mapping files for verification
+            mapping_count = 0
+            for root, dirs, files in os.walk(package_mappings_dir):
+                mapping_count += len([f for f in files if f.endswith('.json')])
+            print(f"    ✓ Included {mapping_count} mapping files")
+        else:
+            print(f"    ⚠️  Mappings directory not found: {mappings_dir}")
+        
         # Install only lightweight dependencies
         install_lightweight_dependencies(package_dir)
         
@@ -158,42 +174,37 @@ def install_lightweight_dependencies(package_dir: str):
     """Install only lightweight dependencies (AWS Pandas layer provides the heavy ones)."""
     print(f"  📦 Installing lightweight dependencies...")
     
-    # Only install dependencies NOT provided by AWS Pandas layer
     # AWS Pandas layer provides: pandas, numpy, pyarrow, boto3, botocore,
     # requests, python-dateutil, pytz, s3transfer, urllib3, jmespath, six,
     # typing_extensions, certifi, charset_normalizer, idna, tzdata
-    # We only need application-specific dependencies
+    #
+    # We should NOT install pydantic since we're using config_simple.py instead
+    # The Lambda functions should use config_simple.py which has no external dependencies
     lightweight_requirements = """
-# Application-specific dependencies only
-# All heavy dependencies provided by AWS Pandas layer:
-# - pandas, numpy, pyarrow
-# - boto3, botocore, s3transfer
-# - requests, urllib3, certifi, charset_normalizer, idna
-# - python-dateutil, pytz, tzdata
-# - jmespath, six, typing_extensions
+# No additional dependencies needed
+# AWS Pandas layer provides all required packages:
+# - pandas, numpy, pyarrow (for data processing)
+# - boto3, botocore, s3transfer (for AWS services)
+# - requests, urllib3, certifi, charset_normalizer, idna (for HTTP)
+# - python-dateutil, pytz, tzdata (for datetime handling)
+# - jmespath, six, typing_extensions (for utilities)
+#
+# Application uses config_simple.py instead of pydantic to avoid dependencies
 """.strip()
     
     requirements_file = os.path.join(package_dir, "requirements.txt")
     with open(requirements_file, 'w') as f:
         f.write(lightweight_requirements)
     
-    # Install dependencies
+    # Since we have no dependencies to install, just create empty requirements
     try:
-        import subprocess
-        subprocess.run([
-            sys.executable, "-m", "pip", "install",
-            "-r", requirements_file,
-            "-t", package_dir,
-            "--upgrade"
-        ], check=True, capture_output=True, text=True)
-        
-        print(f"    ✓ Installed dependencies")
+        print(f"    ✓ No additional dependencies needed (using AWS Pandas layer)")
         
         # Remove the requirements.txt from the package
         os.remove(requirements_file)
         
-    except subprocess.CalledProcessError as e:
-        print(f"    ❌ Failed to install dependencies: {e}")
+    except Exception as e:
+        print(f"    ❌ Error: {e}")
         raise
 
 

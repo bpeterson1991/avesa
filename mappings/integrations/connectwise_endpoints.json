@@ -4,7 +4,7 @@
   "endpoints": {
     "service/tickets": {
       "enabled": true,
-      "canonical_table": "tickets",
+      "table_name": "tickets",
       "sync_frequency": "15min",
       "page_size": 1000,
       "order_by": "id asc",
@@ -13,7 +13,7 @@
     },
     "time/entries": {
       "enabled": true,
-      "canonical_table": "time_entries",
+      "table_name": "time_entries",
       "sync_frequency": "15min",
       "page_size": 1000,
       "order_by": "id asc",
@@ -22,7 +22,7 @@
     },
     "company/companies": {
       "enabled": true,
-      "canonical_table": "companies",
+      "table_name": "companies",
       "sync_frequency": "30min",
       "page_size": 1000,
       "order_by": "id asc",
@@ -31,7 +31,7 @@
     },
     "company/contacts": {
       "enabled": true,
-      "canonical_table": "contacts",
+      "table_name": "contacts",
       "sync_frequency": "30min",
       "page_size": 1000,
       "order_by": "id asc",
@@ -40,7 +40,7 @@
     },
     "procurement/products": {
       "enabled": false,
-      "canonical_table": "products",
+      "table_name": "products",
       "sync_frequency": "60min",
       "page_size": 1000,
       "order_by": "id asc",
@@ -49,7 +49,7 @@
     },
     "finance/agreements": {
       "enabled": false,
-      "canonical_table": "agreements",
+      "table_name": "agreements",
       "sync_frequency": "60min",
       "page_size": 1000,
       "order_by": "id asc",
@@ -58,7 +58,7 @@
     },
     "project/projects": {
       "enabled": false,
-      "canonical_table": "projects",
+      "table_name": "projects",
       "sync_frequency": "30min",
       "page_size": 1000,
       "order_by": "id asc",
@@ -67,7 +67,7 @@
     },
     "system/members": {
       "enabled": false,
-      "canonical_table": "members",
+      "table_name": "members",
       "sync_frequency": "60min",
       "page_size": 1000,
       "order_by": "id asc",

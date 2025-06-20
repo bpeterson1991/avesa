@@ -1,15 +1,23 @@
 # AVESA Dev Environment Setup Guide
 
-This guide provides step-by-step instructions for setting up and testing the AVESA data pipeline in the development environment.
+This guide provides step-by-step instructions for setting up and testing the AVESA optimized data pipeline in the development environment.
+
+**Last Updated:** December 19, 2025
+**Status:** Updated for optimized architecture
 
 ## Overview
 
-The AVESA data pipeline consists of:
-- **ConnectWise Ingestion Lambda**: Pulls data from ConnectWise API
-- **Canonical Transform Lambda**: Single function that transforms raw data to canonical format using `CANONICAL_TABLE` environment variable
-- **DynamoDB Tables**: Store tenant configurations and tracking data
-- **S3 Buckets**: Store raw and canonical data in Parquet format
+The AVESA optimized data pipeline consists of:
+- **Pipeline Orchestrator**: Main entry point using Step Functions for workflow coordination
+- **Tenant Processor**: Handles tenant-level processing with parallel table execution
+- **Table Processor**: Manages table-level processing with intelligent chunking
+- **Chunk Processor**: Processes individual data chunks with timeout handling
+- **Enhanced DynamoDB Tables**: Store tenant configurations, job tracking, and chunk progress
+- **S3 Buckets**: Store raw and canonical data in optimized Parquet format
 - **Secrets Manager**: Store API credentials securely
+- **CloudWatch Monitoring**: Comprehensive metrics and dashboards for performance tracking
+
+> **Architecture Change:** The pipeline now uses a multi-level parallel processing architecture instead of sequential Lambda execution.
 
 ## Prerequisites
 
@@ -23,17 +31,20 @@ The AVESA data pipeline consists of:
 ### 1. Deploy Dev Environment Infrastructure
 
 ```bash
-# Deploy complete dev environment infrastructure using CDK
+# Deploy complete dev environment infrastructure using optimized CDK
 ./scripts/deploy.sh --environment dev --region us-east-2
 ```
 
 This script will:
 - ✅ Create `TenantServices-dev` and `LastUpdated-dev` DynamoDB tables
+- ✅ Create `ProcessingJobs-dev` and `ChunkProgress-dev` tables for job tracking
 - ✅ Create `data-storage-msp-dev` S3 bucket
-- ✅ Deploy Lambda functions with proper dependencies
+- ✅ Deploy optimized Lambda functions with lightweight packaging
+- ✅ Deploy Step Functions state machines for workflow orchestration
 - ✅ Upload mapping configurations to S3
 - ✅ Set up EventBridge scheduling rules
 - ✅ Configure IAM roles and policies
+- ✅ Create CloudWatch dashboards and monitoring
 
 ### 2. Create a Test Tenant with Service
 
@@ -50,19 +61,28 @@ python scripts/setup-service.py \
 This will:
 - ✅ Create a test tenant in DynamoDB (if it doesn't exist)
 - ✅ Store test ConnectWise credentials in Secrets Manager
-- ✅ Configure the tenant for ConnectWise data ingestion
+- ✅ Configure the tenant for optimized data ingestion
+- ✅ Enable the tenant for the new parallel processing pipeline
 
-**Note:** Tenants are created automatically when adding their first service. The DynamoDB schema uses a composite key (`tenant_id` + `service`), so tenant creation is handled seamlessly during service setup.
+**Note:** Tenants are created automatically when adding their first service. The DynamoDB schema uses a composite key (`tenant_id` + `service`), and the optimized pipeline automatically discovers and processes configured tenants.
 
-### 3. Test the Pipeline
+### 3. Test the Optimized Pipeline
 
 ```bash
-# Run comprehensive tests
+# Run comprehensive tests for optimized pipeline
 python scripts/test-lambda-functions.py --environment dev --region us-east-2 --verbose
+
+# Test end-to-end pipeline with optimized architecture
+python scripts/test-end-to-end-pipeline.py --environment dev --region us-east-2
 
 # Test specific components:
 python scripts/test-lambda-functions.py --environment dev --region us-east-2 --skip-canonical
 python scripts/test-lambda-functions.py --environment dev --region us-east-2 --skip-ingestion
+
+# Test Step Functions workflow
+aws stepfunctions start-execution \
+  --state-machine-arn "arn:aws:states:us-east-2:ACCOUNT:stateMachine:PipelineOrchestrator-dev" \
+  --input '{"tenant_id": "{tenant-id}", "table_name": "service/tickets"}'
 ```
 
 ## Detailed Setup Steps
@@ -74,6 +94,8 @@ The dev environment requires specific AWS resources that may be missing:
 #### DynamoDB Tables
 - `TenantServices-dev`: Stores tenant and service configurations
 - `LastUpdated-dev`: Tracks last sync timestamps for incremental updates
+- `ProcessingJobs-dev`: Tracks execution state and job metadata for the optimized pipeline
+- `ChunkProgress-dev`: Tracks chunk-level progress and resumability
 
 #### S3 Bucket
 - `data-storage-msp-dev`: Stores raw and canonical data files
@@ -82,15 +104,22 @@ The dev environment requires specific AWS resources that may be missing:
 - Sample tenant: `{tenant-id}`
 - Sample ConnectWise credentials (non-functional for testing)
 
-### Step 2: Lambda Function Packaging
+### Step 2: Optimized Lambda Function Packaging
 
-The AVESA Lambda functions use a lightweight packaging approach:
+The AVESA optimized Lambda functions use an advanced lightweight packaging approach:
 
 #### AWS Pandas Layer Optimization
 - ✅ 99.9% package size reduction achieved using AWS Pandas layers
 - ✅ Heavy dependencies (pandas, numpy, pyarrow) provided by AWS layers
 - ✅ Lightweight application-specific packages only
 - ✅ Optimized deployment and cold start performance
+- ✅ Specialized functions for orchestration, tenant processing, table processing, and chunk processing
+
+#### Optimized Architecture Components
+- **Pipeline Orchestrator**: [`src/optimized/orchestrator/lambda_function.py`](../src/optimized/orchestrator/lambda_function.py)
+- **Tenant Processor**: [`src/optimized/processors/tenant_processor.py`](../src/optimized/processors/tenant_processor.py)
+- **Table Processor**: [`src/optimized/processors/table_processor.py`](../src/optimized/processors/table_processor.py)
+- **Chunk Processor**: [`src/optimized/processors/chunk_processor.py`](../src/optimized/processors/chunk_processor.py)
 
 ### Step 3: Testing Process
 
@@ -106,34 +135,46 @@ The testing script validates:
 - Successful invocation without errors
 - Proper error handling and logging
 
-#### End-to-End Pipeline
+#### End-to-End Optimized Pipeline
+- Multi-level parallel processing coordination via Step Functions
+- Intelligent chunking and concurrent data processing
+- Enhanced monitoring and progress tracking
 - Data ingestion from ConnectWise API (with test credentials)
 - Canonical transformation processing
-- S3 data storage and retrieval
+- S3 data storage and retrieval with optimized performance
 
 ## Manual Testing Commands
 
-### Test ConnectWise Ingestion
+### Test Optimized Pipeline Orchestrator
 
 ```bash
-# Invoke ConnectWise ingestion function
+# Start optimized pipeline execution via Step Functions
+aws stepfunctions start-execution \
+  --state-machine-arn "arn:aws:states:us-east-2:ACCOUNT:stateMachine:PipelineOrchestrator-dev" \
+  --input '{"tenant_id": "{tenant-id}", "table_name": "service/tickets"}' \
+  --region us-east-2
+
+# Monitor Step Functions execution
+aws stepfunctions describe-execution \
+  --execution-arn "EXECUTION_ARN" \
+  --region us-east-2
+
+# Test individual Lambda components
 aws lambda invoke \
-  --function-name avesa-connectwise-ingestion-dev \
+  --function-name avesa-pipeline-orchestrator-dev \
   --payload '{"tenant_id": "{tenant-id}"}' \
   --cli-binary-format raw-in-base64-out \
   response.json --region us-east-2
 
-# Check the response
-cat response.json
-
-# Monitor logs
-aws logs tail /aws/lambda/avesa-connectwise-ingestion-dev --follow --region us-east-2
+# Monitor optimized pipeline logs
+aws logs tail /aws/lambda/avesa-pipeline-orchestrator-dev --follow --region us-east-2
+aws logs tail /aws/lambda/avesa-tenant-processor-dev --follow --region us-east-2
 ```
 
 ### Test Canonical Transform Functions
 
 ```bash
-# Test canonical transformation (single function with CANONICAL_TABLE environment variable)
+# Test canonical transformation (integrated into optimized pipeline)
 aws lambda invoke \
   --function-name avesa-canonical-transform-dev \
   --payload '{"tenant_id": "{tenant-id}", "table_name": "tickets"}' \
@@ -144,6 +185,10 @@ aws lambda invoke \
 aws lambda invoke --function-name avesa-canonical-transform-dev --payload '{"tenant_id": "{tenant-id}", "table_name": "time_entries"}' --cli-binary-format raw-in-base64-out response.json --region us-east-2
 aws lambda invoke --function-name avesa-canonical-transform-dev --payload '{"tenant_id": "{tenant-id}", "table_name": "companies"}' --cli-binary-format raw-in-base64-out response.json --region us-east-2
 aws lambda invoke --function-name avesa-canonical-transform-dev --payload '{"tenant_id": "{tenant-id}", "table_name": "contacts"}' --cli-binary-format raw-in-base64-out response.json --region us-east-2
+
+# Monitor optimized processing jobs
+aws dynamodb scan --table-name ProcessingJobs-dev --region us-east-2
+aws dynamodb scan --table-name ChunkProgress-dev --region us-east-2
 ```
 
 ### Check Data Storage
@@ -156,8 +201,15 @@ aws s3 ls s3://data-storage-msp-dev/ --recursive --region us-east-2
 aws dynamodb scan --table-name TenantServices-dev --region us-east-2
 aws dynamodb scan --table-name LastUpdated-dev --region us-east-2
 
+# Check optimized pipeline tracking tables
+aws dynamodb scan --table-name ProcessingJobs-dev --region us-east-2
+aws dynamodb scan --table-name ChunkProgress-dev --region us-east-2
+
 # Check secrets
 aws secretsmanager list-secrets --filters Key=name,Values={tenant-id}/ --region us-east-2
+
+# Monitor CloudWatch dashboards
+aws cloudwatch get-dashboard --dashboard-name "AVESA-Pipeline-Overview-dev" --region us-east-2
 ```
 
 ## Adding Real ConnectWise Credentials
@@ -190,7 +242,7 @@ python scripts/setup-service.py \
 ```
 Error: No module named 'pydantic_core._pydantic_core'
 ```
-**Solution**: Redeploy Lambda functions using the deployment script
+**Solution**: Redeploy Lambda functions using the optimized deployment script
 ```bash
 ./scripts/deploy.sh --environment dev --region us-east-2
 ```
@@ -217,10 +269,10 @@ aws s3 ls s3://data-storage-msp-dev/ --region us-east-2
 ```
 Error: Function not found
 ```
-**Solution**: Deploy the infrastructure first
+**Solution**: Deploy the optimized infrastructure first
 ```bash
 cd infrastructure
-cdk deploy --context environment=dev --all --region us-east-2
+cdk deploy --app "python app.py" --context environment=dev --all --region us-east-2
 ```
 
 ### Debugging Steps
@@ -276,10 +328,20 @@ After successful dev environment setup:
 
 ### Data Flow
 ```
-ConnectWise API → ConnectWise Lambda → S3 (Raw Parquet)
-                                           ↓
-S3 (Raw Parquet) → Canonical Transform Lambdas → S3 (Canonical Parquet)
+EventBridge → Pipeline Orchestrator (Step Functions) → Tenant Processor (Step Functions)
+                                                              ↓
+                                                    Table Processor (Step Functions)
+                                                              ↓
+                                                    Chunk Processor (Lambda) → S3 (Raw Parquet)
+                                                              ↓
+                                                    Canonical Transform → S3 (Canonical Parquet)
 ```
+
+**Optimized Architecture Benefits:**
+- Multi-level parallelization (tenant → table → chunk)
+- Intelligent chunking with timeout handling
+- Resumable processing with state persistence
+- Comprehensive monitoring and progress tracking
 
 ### Storage Structure
 ```

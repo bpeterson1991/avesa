@@ -10,6 +10,11 @@ DYNAMODB SCHEMA DOCUMENTATION:
 1. TenantServices Table:
    - Partition Key: tenant_id (STRING) - Identifies the tenant organization
    - Sort Key: service (STRING) - Identifies the integration service (e.g., 'connectwise', 'servicenow')
+   - Additional Attributes:
+     * enabled (BOOLEAN) - Whether the service is enabled for this tenant
+     * secret_name (STRING) - AWS Secrets Manager secret name for service credentials
+     * updated_at (STRING) - ISO timestamp of last configuration update
+     * created_at (STRING) - ISO timestamp of initial configuration creation
    - Purpose: Stores which services are enabled for each tenant, along with configuration metadata
    - Example Key: tenant_id='acme-corp', service='connectwise'
 
@@ -105,12 +110,17 @@ class DataPipelineStack(Stack):
         """
         Create DynamoDB table for tenant service configuration.
         
-        Schema:
-        - Partition Key: tenant_id (STRING) - Identifies the tenant
+        Complete Schema:
+        - Partition Key: tenant_id (STRING) - Identifies the tenant organization
         - Sort Key: service (STRING) - Identifies the specific service (e.g., 'connectwise', 'servicenow')
+        - Additional Attributes:
+          * enabled (BOOLEAN) - Whether the service is enabled for this tenant
+          * secret_name (STRING) - AWS Secrets Manager secret name for service credentials
+          * updated_at (STRING) - ISO timestamp of last configuration update
+          * created_at (STRING) - ISO timestamp of initial configuration creation
         
-        This table stores configuration for which services are enabled for each tenant,
-        along with metadata like company name, secret references, and service status.
+        This table stores complete configuration for which services are enabled for each tenant,
+        including service status, credential references, and audit timestamps.
         """
         # Remove environment suffix for production (hybrid account approach)
         table_name = "TenantServices" if self.env_name == "prod" else f"TenantServices-{self.env_name}"

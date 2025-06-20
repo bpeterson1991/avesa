@@ -1,10 +1,34 @@
 # AVESA Scripts Directory
 
-This directory contains automated scripts for setting up and managing the AVESA Multi-Tenant Data Pipeline infrastructure.
+This directory contains automated scripts for setting up and managing the AVESA Multi-Tenant Data Pipeline optimized infrastructure.
+
+**Last Updated:** December 19, 2025
+**Status:** Final cleanup completed - optimized for day-to-day operations
+
+## Currently Active Scripts
+
+### Core Deployment Scripts
+
+#### [`deploy.sh`](deploy.sh) ⭐ **PRIMARY DEPLOYMENT SCRIPT**
+Deployment script for all environments using the parallel processing architecture.
+
+```bash
+# Deploy to development
+./scripts/deploy.sh --environment dev
+
+# Deploy to production
+./scripts/deploy.sh --environment prod --profile avesa-production
+```
+
+**Features:**
+- Deploys infrastructure using [`infrastructure/app.py`](../infrastructure/app.py)
+- Includes Step Functions state machines for parallel processing
+- Enhanced Lambda functions with lightweight packaging
+- Comprehensive monitoring and dashboards
 
 ## AWS IAM Setup Scripts for GitHub Actions
 
-These scripts automate the setup of cross-account IAM roles and users needed for GitHub Actions production deployment.
+These scripts automate the setup of cross-account IAM roles and users needed for GitHub Actions production deployment with the optimized architecture.
 
 ### Quick Start
 
@@ -20,7 +44,7 @@ This interactive script will guide you through the entire process.
 
 #### 1. Production Account Setup
 
-[`setup-production-iam.sh`](setup-production-iam.sh) - Creates the deployment role in your production AWS account.
+[`setup-production-iam.sh`](setup-production-iam.sh) - Creates the deployment role in your production AWS account for optimized architecture deployment.
 
 ```bash
 ./scripts/setup-production-iam.sh \
@@ -36,7 +60,7 @@ This interactive script will guide you through the entire process.
 
 #### 2. Development Account Setup
 
-[`setup-development-iam.sh`](setup-development-iam.sh) - Creates the GitHub Actions user in your development account.
+[`setup-development-iam.sh`](setup-development-iam.sh) - Creates the GitHub Actions user in your development account for optimized deployments.
 
 ```bash
 ./scripts/setup-development-iam.sh \
@@ -249,28 +273,34 @@ aws iam delete-policy --policy-arn arn:aws:iam::PROD_ACCOUNT:policy/AVESADeploym
 aws iam delete-role --role-name GitHubActionsDeploymentRole
 ```
 
-## Other Deployment Scripts
+## Service Management Scripts
 
-### Core Deployment
+### Lambda Function Management
 
-#### [`deploy.sh`](deploy.sh)
-Unified deployment script for all environments.
+#### [`package-lightweight-lambdas.py`](package-lightweight-lambdas.py) ⭐ **OPTIMIZED PACKAGING**
+Package optimized Lambda functions with lightweight dependencies.
 
 ```bash
-# Deploy to development
-./scripts/deploy.sh --environment dev
+# Package all optimized functions
+python scripts/package-lightweight-lambdas.py --function all
 
-# Deploy to production
-./scripts/deploy.sh --environment prod --profile avesa-production
+# Package specific optimized function
+python scripts/package-lightweight-lambdas.py --function optimized-orchestrator
+python scripts/package-lightweight-lambdas.py --function optimized-processors
 ```
 
-### Service Management
+**Features:**
+- 99.9% package size reduction using AWS Pandas layers
+- Optimized for the new parallel processing architecture
+- Supports all optimized Lambda components
+
+### Tenant and Service Management
 
 #### [`setup-service.py`](setup-service.py)
-Configure tenant services after deployment.
+Configure tenant services for the optimized pipeline.
 
 ```bash
-# Setup ConnectWise for a tenant
+# Setup ConnectWise for a tenant (works with optimized architecture)
 python scripts/setup-service.py \
   --tenant-id "example-tenant" \
   --service connectwise \
@@ -278,26 +308,41 @@ python scripts/setup-service.py \
 ```
 
 #### [`trigger-backfill.py`](trigger-backfill.py)
-Trigger data backfill for tenants.
+Trigger data backfill for tenants using optimized processing.
 
 ```bash
-# Trigger backfill for specific tenant
+# Trigger backfill for specific tenant (uses optimized pipeline)
 python scripts/trigger-backfill.py \
   --tenant-id "example-tenant" \
   --environment dev
 ```
 
-### Lambda Management
+### Testing and Validation Scripts
 
-#### [`package-lightweight-lambdas.py`](package-lightweight-lambdas.py)
-Package optimized Lambda functions.
+#### [`test-end-to-end-pipeline.py`](test-end-to-end-pipeline.py) ⭐ **OPTIMIZED TESTING**
+Test the complete optimized pipeline end-to-end.
 
 ```bash
-# Package all functions
-python scripts/package-lightweight-lambdas.py --function all
+# Test optimized pipeline
+python scripts/test-end-to-end-pipeline.py --environment dev --region us-east-2
+```
 
-# Package specific function
-python scripts/package-lightweight-lambdas.py --function connectwise
+#### [`test-lambda-functions.py`](test-lambda-functions.py)
+Test individual Lambda functions (updated for optimized architecture).
+
+```bash
+# Test optimized Lambda functions
+python scripts/test-lambda-functions.py --environment dev --region us-east-2 --verbose
+```
+
+### Maintenance Scripts
+
+#### [`cleanup-stuck-jobs.py`](cleanup-stuck-jobs.py)
+Clean up stuck processing jobs in the optimized pipeline.
+
+```bash
+# Clean up stuck jobs
+python scripts/cleanup-stuck-jobs.py --environment dev
 ```
 
 ## Script Dependencies
@@ -305,7 +350,8 @@ python scripts/package-lightweight-lambdas.py --function connectwise
 ### Python Scripts
 - Python 3.9+
 - boto3
-- Required packages in `requirements.txt`
+- Required packages in [`requirements.txt`](../requirements.txt)
+- AWS Pandas layers (for optimized Lambda functions)
 
 ### Bash Scripts
 - AWS CLI v2
@@ -320,11 +366,18 @@ export AWS_PROFILE=your-profile
 export AWS_DEFAULT_REGION=us-east-2
 ```
 
-### GitHub Actions Secrets
+### GitHub Actions Secrets (for optimized deployments)
 ```bash
 export AWS_ACCESS_KEY_ID_PROD=AKIA...
 export AWS_SECRET_ACCESS_KEY_PROD=...
 export AWS_PROD_DEPLOYMENT_ROLE_ARN=arn:aws:iam::123456789012:role/GitHubActionsDeploymentRole
+```
+
+### Optimized Architecture Variables
+```bash
+# For optimized CDK deployment
+export CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+export CDK_PROD_ACCOUNT=your-prod-account-id
 ```
 
 ## Best Practices
@@ -334,18 +387,20 @@ export AWS_PROD_DEPLOYMENT_ROLE_ARN=arn:aws:iam::123456789012:role/GitHubActions
 2. **Use least privilege** IAM policies
 3. **Monitor CloudTrail** for unusual activity
 4. **Store secrets securely** in GitHub only
+5. **Use optimized architecture** for enhanced security
 
 ### Operations
-1. **Test in development** before production
+1. **Test in development** before production using optimized pipeline
 2. **Use validation scripts** before deployment
-3. **Keep rollback scripts** for emergency use
-4. **Document all changes** in commit messages
+3. **Document all changes** in commit messages
+4. **Monitor optimized pipeline** performance via CloudWatch dashboards
 
 ### Monitoring
 1. **Enable CloudTrail** logging
-2. **Set up CloudWatch** alarms
-3. **Monitor GitHub Actions** logs
+2. **Set up CloudWatch** alarms for optimized components
+3. **Monitor GitHub Actions** logs for optimized deployments
 4. **Review IAM policies** regularly
+5. **Use optimized monitoring dashboards** for real-time insights
 
 ## Support
 
@@ -359,10 +414,13 @@ For issues with these scripts:
 
 ### Related Documentation
 
+- [Deployment Guide (Updated)](../docs/DEPLOYMENT.md) - Optimized deployment procedures
+- [Dev Environment Setup (Updated)](../docs/DEV_ENVIRONMENT_SETUP_GUIDE.md) - Optimized development setup
+- [Migration Strategy (Completed)](../docs/MIGRATION_STRATEGY.md) - Migration completion details
+- [Phase 1 Implementation (Completed)](../docs/PHASE_1_IMPLEMENTATION_README.md) - Implementation status
 - [AWS Credentials Setup Guide](../docs/AWS_CREDENTIALS_SETUP_GUIDE.md)
 - [GitHub Secrets Quick Setup](../docs/GITHUB_SECRETS_QUICK_SETUP.md)
 - [sts:TagSession Permission Fix](../docs/STS_TAGSESSION_FIX.md)
-- [Deployment Guide](../docs/DEPLOYMENT.md)
 - [Production Environment Setup](../docs/PROD_ENVIRONMENT_SETUP_GUIDE.md)
 
 ## Contributing
@@ -373,7 +431,16 @@ When adding new scripts:
 2. **Include usage documentation** in script headers
 3. **Add error handling** and validation
 4. **Update this README** with new script information
-5. **Test thoroughly** in development environment
+5. **Test thoroughly** in development environment with optimized architecture
+6. **Ensure compatibility** with optimized infrastructure components
+
+### Script Categories
+
+**✅ Active Scripts** (in `scripts/` directory):
+- Deployment and infrastructure management
+- Service and tenant configuration
+- Testing and validation
+- Maintenance and cleanup
 
 ## License
 

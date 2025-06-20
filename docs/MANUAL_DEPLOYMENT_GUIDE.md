@@ -1,8 +1,13 @@
 # Manual Production Deployment Guide
 
+**Last Updated:** December 19, 2025
+**Status:** Updated for optimized architecture
+
 ## Overview
 
-Production deployments are now **manually controlled** and require explicit confirmation to prevent accidental deployments. This guide explains how to safely deploy to production using the GitHub Actions workflow.
+Production deployments are now **manually controlled** and require explicit confirmation to prevent accidental deployments. This guide explains how to safely deploy the optimized AVESA architecture to production using the GitHub Actions workflow.
+
+> **Architecture Update:** This guide covers deployment of the optimized parallel processing architecture.
 
 ## Key Changes
 
@@ -18,6 +23,8 @@ Production deployments are now **manually controlled** and require explicit conf
 - **Component selection** (all, infrastructure-only, lambdas-only)
 - **Enhanced safety checks** and validation
 - **Comprehensive audit logging**
+- **Optimized architecture deployment** with performance monitoring
+- **Step Functions workflow deployment** for parallel processing
 
 ## How to Deploy to Production
 
@@ -50,10 +57,11 @@ Production deployments are now **manually controlled** and require explicit conf
 #### 🔧 Components to Deploy
 - **Field:** `components_to_deploy`
 - **Options:**
-  - `all` - Deploy infrastructure and Lambda functions
-  - `infrastructure-only` - Deploy only CDK infrastructure
-  - `lambdas-only` - Deploy only Lambda functions
+  - `all` - Deploy optimized infrastructure, Lambda functions, and Step Functions
+  - `infrastructure-only` - Deploy only CDK infrastructure (includes Step Functions state machines)
+  - `lambdas-only` - Deploy only optimized Lambda functions
 - **Default:** `all`
+- **Note:** Uses [`scripts/deploy.sh`](../scripts/deploy.sh) and [`infrastructure/app.py`](../infrastructure/app.py)
 
 #### ⚡ Force Deploy
 - **Field:** `force_deploy`
@@ -98,10 +106,12 @@ graph TD
 - Provides audit trail
 
 ### 🔍 Post-Deployment Validation
-- Lists deployed Lambda functions
-- Checks DynamoDB table status
+- Lists deployed optimized Lambda functions (orchestrator, processors)
+- Checks DynamoDB table status (including ProcessingJobs and ChunkProgress tables)
 - Verifies S3 bucket access
-- Tests Lambda function execution
+- Tests Step Functions state machine execution
+- Validates CloudWatch dashboard creation
+- Tests Lambda function execution and monitoring
 
 ## Audit Trail
 
@@ -127,12 +137,12 @@ Every deployment creates a comprehensive audit trail including:
 - **Solution:** Provide a clear, descriptive reason
 
 #### ❌ "Lambda packages directory not created"
-- **Cause:** Lambda packaging script failed
-- **Solution:** Check script logs and fix any dependency issues
+- **Cause:** Optimized Lambda packaging script failed
+- **Solution:** Check [`scripts/package-lightweight-lambdas.py`](../scripts/package-lightweight-lambdas.py) logs and fix any dependency issues
 
 #### ❌ "Deployment failed"
-- **Cause:** CDK deployment error
-- **Solution:** Check AWS credentials and infrastructure configuration
+- **Cause:** CDK deployment error with optimized infrastructure
+- **Solution:** Check AWS credentials and [`infrastructure/app.py`](../infrastructure/app.py) configuration
 
 ### Getting Help
 
@@ -154,9 +164,9 @@ Every deployment creates a comprehensive audit trail including:
 - Mention impact and urgency level
 
 ### 🔧 Component Selection
-- Use `all` for complete deployments
-- Use `infrastructure-only` for CDK-only changes
-- Use `lambdas-only` for code-only updates
+- Use `all` for complete optimized deployments (recommended)
+- Use `infrastructure-only` for CDK-only changes (includes Step Functions)
+- Use `lambdas-only` for optimized Lambda function updates only
 
 ### 🚨 Emergency Deployments
 - Still require manual confirmation
@@ -174,8 +184,23 @@ Every deployment creates a comprehensive audit trail including:
 
 ## Next Steps After Deployment
 
-1. **Monitor application health** and metrics
-2. **Verify all services** are functioning correctly
-3. **Run integration tests** if applicable
-4. **Update documentation** if needed
-5. **Notify stakeholders** of successful deployment
+1. **Monitor application health** and optimized pipeline metrics via CloudWatch dashboards
+2. **Verify all services** are functioning correctly (Step Functions, Lambda functions, DynamoDB tables)
+3. **Test optimized pipeline execution** with sample tenant data
+4. **Run integration tests** for the parallel processing architecture
+5. **Monitor performance improvements** compared to legacy system
+6. **Update documentation** if needed
+7. **Notify stakeholders** of successful optimized deployment
+
+### Monitoring the Optimized Pipeline
+
+```bash
+# Check Step Functions executions
+aws stepfunctions list-executions --state-machine-arn "arn:aws:states:REGION:ACCOUNT:stateMachine:PipelineOrchestrator-prod"
+
+# Monitor CloudWatch dashboards
+aws cloudwatch get-dashboard --dashboard-name "AVESA-Pipeline-Overview-prod"
+
+# Check processing jobs
+aws dynamodb scan --table-name ProcessingJobs-prod --max-items 10
+```

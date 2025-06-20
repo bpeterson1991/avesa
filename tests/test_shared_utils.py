@@ -3,7 +3,7 @@ Unit tests for shared utilities.
 """
 
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from src.shared.utils import (
     flatten_json, get_timestamp, get_s3_key, chunk_list,
     safe_get, normalize_datetime, calculate_data_freshness
@@ -153,7 +153,7 @@ class TestCalculateDataFreshness:
         """Test calculating freshness for recent timestamp."""
         # Create a timestamp 1 hour ago
         one_hour_ago = datetime.now(timezone.utc).replace(microsecond=0) - \
-                      datetime.timedelta(hours=1)
+                      timedelta(hours=1)
         timestamp_str = one_hour_ago.isoformat().replace('+00:00', 'Z')
         
         freshness = calculate_data_freshness(timestamp_str)

@@ -1,0 +1,203 @@
+{
+  "Comment": "AVESA Data Pipeline Orchestrator - Main entry point for all pipeline executions",
+  "StartAt": "InitializePipeline",
+  "States": {
+    "InitializePipeline": {
+      "Type": "Pass",
+      "Comment": "Pipeline already initialized by orchestrator Lambda",
+      "Result": "Pipeline initialized",
+      "ResultPath": "$.initialization_status",
+      "Next": "DetermineProcessingMode"
+    },
+    
+    "DetermineProcessingMode": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.mode",
+          "StringEquals": "multi-tenant",
+          "Next": "MultiTenantProcessing"
+        },
+        {
+          "Variable": "$.mode",
+          "StringEquals": "single-tenant",
+          "Next": "SingleTenantProcessing"
+        }
+      ],
+      "Default": "HandleInvalidMode"
+    },
+    
+    "MultiTenantProcessing": {
+      "Type": "Map",
+      "ItemsPath": "$.tenants",
+      "MaxConcurrency": 10,
+      "Parameters": {
+        "tenant_config.$": "$$.Map.Item.Value",
+        "job_id.$": "$.job_id",
+        "table_name.$": "$.table_name",
+        "force_full_sync.$": "$.force_full_sync",
+        "execution_id.$": "$$.Execution.Name"
+      },
+      "Iterator": {
+        "StartAt": "ProcessTenant",
+        "States": {
+          "ProcessTenant": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::states:startExecution.sync:2",
+            "Parameters": {
+              "StateMachineArn": "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:TenantProcessor-${Environment}",
+              "Input": {
+                "tenant_config.$": "$.tenant_config",
+                "job_id.$": "$.job_id",
+                "table_name.$": "$.table_name",
+                "force_full_sync.$": "$.force_full_sync",
+                "execution_id.$": "$.execution_id"
+              }
+            },
+            "Retry": [
+              {
+                "ErrorEquals": ["States.ExecutionLimitExceeded"],
+                "IntervalSeconds": 60,
+                "MaxAttempts": 5,
+                "BackoffRate": 2.0
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "Next": "TenantProcessingFailed",
+                "ResultPath": "$.error"
+              }
+            ],
+            "End": true
+          },
+          "TenantProcessingFailed": {
+            "Type": "Pass",
+            "Parameters": {
+              "tenant_id.$": "$.tenant_config.tenant_id",
+              "status": "failed",
+              "error.$": "$.error"
+            },
+            "End": true
+          }
+        }
+      },
+      "ResultPath": "$.tenant_results",
+      "Next": "AggregateMultiTenantResults"
+    },
+    
+    "SingleTenantProcessing": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::states:startExecution.sync:2",
+      "Parameters": {
+        "StateMachineArn": "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:TenantProcessor-${Environment}",
+        "Input": {
+          "tenant_config.$": "$.tenants[0]",
+          "job_id.$": "$.job_id",
+          "table_name.$": "$.table_name",
+          "force_full_sync.$": "$.force_full_sync",
+          "execution_id.$": "$$.Execution.Name"
+        }
+      },
+      "ResultPath": "$.tenant_result",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.ExecutionLimitExceeded"],
+          "IntervalSeconds": 60,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "HandleSingleTenantFailure",
+          "ResultPath": "$.error"
+        }
+      ],
+      "Next": "AggregateSingleTenantResults"
+    },
+    
+    "AggregateMultiTenantResults": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:avesa-result-aggregator-${Environment}",
+      "Parameters": {
+        "job_id.$": "$.job_id",
+        "tenant_results.$": "$.tenant_results",
+        "processing_mode": "multi-tenant"
+      },
+      "ResultPath": "$.aggregation_result",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "NotifyCompletion"
+    },
+    
+    "AggregateSingleTenantResults": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:avesa-result-aggregator-${Environment}",
+      "Parameters": {
+        "job_id.$": "$.job_id",
+        "tenant_result.$": "$.tenant_result",
+        "processing_mode": "single-tenant"
+      },
+      "ResultPath": "$.aggregation_result",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "NotifyCompletion"
+    },
+    
+    "NotifyCompletion": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:avesa-completion-notifier-${Environment}",
+      "Parameters": {
+        "job_id.$": "$.job_id",
+        "results.$": "$",
+        "execution_arn.$": "$$.Execution.Name"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "End": true
+    },
+    
+    "HandleSingleTenantFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:avesa-error-handler-${Environment}",
+      "Parameters": {
+        "error_type": "single_tenant_failure",
+        "error_details.$": "$.error",
+        "tenant_config.$": "$.tenants[0]"
+      },
+      "Next": "PipelineFailure"
+    },
+    
+    "HandleInvalidMode": {
+      "Type": "Fail",
+      "Cause": "Invalid processing mode specified",
+      "Error": "InvalidProcessingMode"
+    },
+    
+    "PipelineFailure": {
+      "Type": "Fail",
+      "Cause": "Pipeline execution failed",
+      "Error": "PipelineExecutionFailure"
+    }
+  }
+}

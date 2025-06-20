@@ -204,7 +204,7 @@ def test_connectwise_ingestion(lambda_client, environment: str, tenant_id: str, 
 def test_canonical_transforms(lambda_client, environment: str, tenant_id: str, verbose: bool) -> List[Dict[str, Any]]:
     """Test canonical transform functions."""
     results = []
-    canonical_tables = ['tickets', 'time-entries', 'companies', 'contacts']
+    canonical_tables = ['tickets', 'time_entries', 'companies', 'contacts']
     
     for table in canonical_tables:
         function_name = f"avesa-canonical-transform-{table}-{environment}"
@@ -327,12 +327,12 @@ def print_troubleshooting_guide(failed_tests: List[Dict[str, Any]], environment:
         
         if 'DynamoDB Table' in test_name:
             print("   Solutions:")
-            print(f"   1. Create missing table: python scripts/setup-dev-environment.py --region {region}")
+            print(f"   1. Deploy infrastructure: cd infrastructure && cdk deploy --context environment={environment}")
             print(f"   2. Check table status: aws dynamodb describe-table --table-name [TABLE_NAME] --region {region}")
         
         elif 'S3 Bucket' in test_name:
             print("   Solutions:")
-            print(f"   1. Create missing bucket: python scripts/setup-dev-environment.py --region {region}")
+            print(f"   1. Deploy infrastructure: cd infrastructure && cdk deploy --context environment={environment}")
             print(f"   2. Check bucket permissions: aws s3 ls s3://[BUCKET_NAME] --region {region}")
         
         elif 'Lambda Function' in test_name and 'Exists' in test_name:

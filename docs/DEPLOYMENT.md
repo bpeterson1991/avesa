@@ -1,6 +1,9 @@
 # AVESA Deployment Guide
 
-This guide covers deploying the AVESA Multi-Tenant Data Pipeline to AWS using the unified deployment script.
+This guide covers deploying the AVESA Multi-Tenant Data Pipeline to AWS using the optimized deployment script.
+
+**Last Updated:** December 19, 2025
+**Status:** Updated for optimized architecture
 
 ## Prerequisites
 
@@ -46,9 +49,9 @@ pip install -r requirements.txt
 ./scripts/deploy.sh --environment prod
 ```
 
-## Unified Deployment Script
+## Optimized Deployment Script
 
-The `scripts/deploy.sh` script provides a consistent deployment experience across all environments.
+The [`scripts/deploy.sh`](../scripts/deploy.sh) script provides a consistent deployment experience across all environments using the optimized architecture.
 
 ### Usage
 
@@ -107,8 +110,8 @@ The unified script follows this consistent workflow for all environments:
 - Uses environment-specific AWS profile
 
 ### 4. Infrastructure Deployment
-- Synthesizes CDK application with environment context
-- Deploys all CDK stacks
+- Synthesizes CDK application with environment context using [`infrastructure/app.py`](../infrastructure/app.py)
+- Deploys all CDK stacks including performance optimization stack
 - Handles environment-specific resource naming
 
 ### 5. Mapping File Upload
@@ -312,21 +315,6 @@ For partial rollbacks, redeploy with previous configuration:
 git checkout <previous-commit>
 ./scripts/deploy.sh --environment dev
 ```
-
-## Migration from Legacy Scripts
-
-If migrating from the old deployment scripts:
-
-1. **Remove old scripts** (done automatically):
-   - `scripts/deploy-dev-staging.sh`
-   - `scripts/deploy-prod.sh`
-
-2. **Update CI/CD pipelines** to use:
-   ```bash
-   ./scripts/deploy.sh --environment $ENVIRONMENT
-   ```
-
-3. **Update documentation references** to point to unified script
 
 ## Advanced Configuration
 

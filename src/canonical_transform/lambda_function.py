@@ -277,10 +277,10 @@ def find_raw_data_files(config: Config, tenant_id: str, canonical_table: str, lo
 def get_source_mapping(canonical_table: str) -> Optional[Dict[str, str]]:
     """Get source service and table mapping for canonical table."""
     mappings = {
-        'tickets': {'service': 'connectwise', 'table': 'service/tickets'},
-        'time_entries': {'service': 'connectwise', 'table': 'time/entries'},
-        'companies': {'service': 'connectwise', 'table': 'company/companies'},
-        'contacts': {'service': 'connectwise', 'table': 'company/contacts'}
+        'tickets': {'service': 'connectwise', 'table': 'tickets'},
+        'time_entries': {'service': 'connectwise', 'table': 'time_entries'},
+        'companies': {'service': 'connectwise', 'table': 'companies'},
+        'contacts': {'service': 'connectwise', 'table': 'contacts'}
     }
     return mappings.get(canonical_table)
 
@@ -288,11 +288,25 @@ def get_source_mapping(canonical_table: str) -> Optional[Dict[str, str]]:
 def load_and_transform_raw_data(config: Config, s3_key: str, canonical_table: str, logger: PipelineLogger) -> List[Dict[str, Any]]:
     """Load raw data and transform to canonical format."""
     import pandas as pd
+    import json
     
     try:
         # Read raw data from S3
         response = s3.get_object(Bucket=config.bucket_name, Key=s3_key)
-        df = pd.read_parquet(response['Body'])
+        
+        # Check if file is JSON or parquet based on extension
+        if s3_key.endswith('.json'):
+            # Read JSON data
+            raw_data = json.loads(response['Body'].read().decode('utf-8'))
+            
+            # Convert to DataFrame - handle both single objects and arrays
+            if isinstance(raw_data, list):
+                df = pd.DataFrame(raw_data)
+            else:
+                df = pd.DataFrame([raw_data])
+        else:
+            # Read parquet data
+            df = pd.read_parquet(response['Body'])
         
         if df.empty:
             return []
@@ -316,13 +330,19 @@ def load_and_transform_raw_data(config: Config, s3_key: str, canonical_table: st
 
 
 def load_canonical_mapping(canonical_table: str) -> Dict[str, Any]:
-    """Load canonical mapping configuration."""
+    """Load canonical mapping configuration using shared utilities."""
     try:
-        # Try to load from S3 first
-        mapping_key = f"mappings/canonical/{canonical_table}.json"
-        response = s3.get_object(Bucket=os.environ['BUCKET_NAME'], Key=mapping_key)
-        return json.loads(response['Body'].read().decode('utf-8'))
-    except:
+        # Use the shared utility function which handles bundled mappings
+        from utils import load_canonical_mapping as shared_load_canonical_mapping
+        mapping = shared_load_canonical_mapping(canonical_table)
+        
+        # If no mapping found, use default mapping as fallback
+        if not mapping:
+            return get_default_mapping(canonical_table)
+        
+        return mapping
+    except Exception as e:
+        print(f"Failed to load canonical mapping, using default: {e}")
         # Fallback to default mapping
         return get_default_mapping(canonical_table)
 

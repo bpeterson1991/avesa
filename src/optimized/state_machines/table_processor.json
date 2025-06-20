@@ -1,0 +1,298 @@
+{
+  "Comment": "AVESA Table Processor - Handles chunked processing of a single table",
+  "StartAt": "InitializeTableProcessing",
+  "States": {
+    "InitializeTableProcessing": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:avesa-table-processor-${Environment}",
+      "Parameters": {
+        "table_config.$": "$.table_config",
+        "tenant_config.$": "$.tenant_config",
+        "job_id.$": "$.job_id",
+        "force_full_sync.$": "$.force_full_sync"
+      },
+      "ResultPath": "$.table_processing_result",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "TableInitializationFailed",
+          "ResultPath": "$.error"
+        }
+      ],
+      "Next": "ValidateChunkPlan"
+    },
+    
+    "ValidateChunkPlan": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.table_processing_result.chunk_plan.total_chunks",
+          "NumericGreaterThan": 0,
+          "Next": "ProcessChunks"
+        }
+      ],
+      "Default": "NoDataToProcess"
+    },
+    
+    "ProcessChunks": {
+      "Type": "Map",
+      "ItemsPath": "$.table_processing_result.chunk_plan.chunks",
+      "MaxConcurrency": 3,
+      "Parameters": {
+        "chunk_config.$": "$$.Map.Item.Value",
+        "table_config.$": "$.table_config",
+        "tenant_config.$": "$.tenant_config",
+        "job_id.$": "$.job_id",
+        "table_state.$": "$.table_processing_result.table_state"
+      },
+      "Iterator": {
+        "StartAt": "ProcessChunk",
+        "States": {
+          "ProcessChunk": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:avesa-chunk-processor-${Environment}",
+            "Parameters": {
+              "chunk_config.$": "$.chunk_config",
+              "table_config.$": "$.table_config",
+              "tenant_config.$": "$.tenant_config",
+              "job_id.$": "$.job_id"
+            },
+            "TimeoutSeconds": 900,
+            "Retry": [
+              {
+                "ErrorEquals": ["States.TaskFailed"],
+                "IntervalSeconds": 30,
+                "MaxAttempts": 3,
+                "BackoffRate": 2.0
+              },
+              {
+                "ErrorEquals": ["Lambda.TooManyRequestsException"],
+                "IntervalSeconds": 60,
+                "MaxAttempts": 5,
+                "BackoffRate": 2.0
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": ["States.Timeout"],
+                "Next": "HandleChunkTimeout",
+                "ResultPath": "$.timeout_error"
+              },
+              {
+                "ErrorEquals": ["States.ALL"],
+                "Next": "ChunkProcessingFailed",
+                "ResultPath": "$.error"
+              }
+            ],
+            "Next": "UpdateChunkProgress"
+          },
+          
+          "UpdateChunkProgress": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:avesa-progress-tracker-${Environment}",
+            "Parameters": {
+              "job_id.$": "$.job_id",
+              "chunk_id.$": "$.chunk_config.chunk_id",
+              "status": "completed",
+              "result.$": "$"
+            },
+            "Retry": [
+              {
+                "ErrorEquals": ["States.TaskFailed"],
+                "IntervalSeconds": 5,
+                "MaxAttempts": 2,
+                "BackoffRate": 2.0
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "Next": "ProgressUpdateFailed",
+                "ResultPath": "$.progress_error"
+              }
+            ],
+            "End": true
+          },
+          
+          "HandleChunkTimeout": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:avesa-timeout-handler-${Environment}",
+            "Parameters": {
+              "job_id.$": "$.job_id",
+              "chunk_config.$": "$.chunk_config",
+              "timeout_error.$": "$.timeout_error"
+            },
+            "Retry": [
+              {
+                "ErrorEquals": ["States.TaskFailed"],
+                "IntervalSeconds": 10,
+                "MaxAttempts": 2,
+                "BackoffRate": 2.0
+              }
+            ],
+            "Next": "ScheduleChunkResumption"
+          },
+          
+          "ScheduleChunkResumption": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::states:startExecution",
+            "Parameters": {
+              "StateMachineArn": "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:TableProcessor-${Environment}",
+              "Input": {
+                "table_config.$": "$.table_config",
+                "tenant_config.$": "$.tenant_config",
+                "job_id.$": "$.job_id",
+                "resume_chunk_id.$": "$.chunk_config.chunk_id"
+              }
+            },
+            "End": true
+          },
+          
+          "ChunkProcessingFailed": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:avesa-progress-tracker-${Environment}",
+            "Parameters": {
+              "job_id.$": "$.job_id",
+              "chunk_id.$": "$.chunk_config.chunk_id",
+              "status": "failed",
+              "error.$": "$.error"
+            },
+            "Retry": [
+              {
+                "ErrorEquals": ["States.TaskFailed"],
+                "IntervalSeconds": 5,
+                "MaxAttempts": 2,
+                "BackoffRate": 2.0
+              }
+            ],
+            "End": true
+          },
+          
+          "ProgressUpdateFailed": {
+            "Type": "Pass",
+            "Parameters": {
+              "chunk_id.$": "$.chunk_config.chunk_id",
+              "status": "completed_with_progress_error",
+              "progress_error.$": "$.progress_error"
+            },
+            "End": true
+          }
+        }
+      },
+      "ResultPath": "$.chunk_results",
+      "Next": "EvaluateChunkResults"
+    },
+    
+    "EvaluateChunkResults": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:avesa-chunk-result-evaluator-${Environment}",
+      "Parameters": {
+        "job_id.$": "$.job_id",
+        "table_name.$": "$.table_config.table_name",
+        "tenant_id.$": "$.tenant_config.tenant_id",
+        "chunk_results.$": "$.chunk_results"
+      },
+      "ResultPath": "$.table_evaluation",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "UpdateLastUpdatedTimestamp"
+    },
+    
+    "UpdateLastUpdatedTimestamp": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:avesa-timestamp-updater-${Environment}",
+      "Parameters": {
+        "tenant_id.$": "$.tenant_config.tenant_id",
+        "table_name.$": "$.table_config.table_name",
+        "job_id.$": "$.job_id",
+        "chunk_results.$": "$.chunk_results"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "TimestampUpdateFailed",
+          "ResultPath": "$.timestamp_error"
+        }
+      ],
+      "Next": "TableProcessingComplete"
+    },
+    
+    "TimestampUpdateFailed": {
+      "Type": "Pass",
+      "Parameters": {
+        "table_name.$": "$.table_config.table_name",
+        "tenant_id.$": "$.tenant_config.tenant_id",
+        "status": "completed_with_timestamp_error",
+        "chunk_results.$": "$.chunk_results",
+        "evaluation.$": "$.table_evaluation",
+        "timestamp_error.$": "$.timestamp_error"
+      },
+      "End": true
+    },
+    
+    "TableProcessingComplete": {
+      "Type": "Pass",
+      "Parameters": {
+        "table_name.$": "$.table_config.table_name",
+        "tenant_id.$": "$.tenant_config.tenant_id",
+        "status": "completed",
+        "chunk_results.$": "$.chunk_results",
+        "evaluation.$": "$.table_evaluation"
+      },
+      "End": true
+    },
+    
+    "NoDataToProcess": {
+      "Type": "Pass",
+      "Parameters": {
+        "table_name.$": "$.table_config.table_name",
+        "tenant_id.$": "$.tenant_config.tenant_id",
+        "status": "completed",
+        "message": "No new data to process",
+        "records_processed": 0
+      },
+      "End": true
+    },
+    
+    "TableInitializationFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:avesa-error-handler-${Environment}",
+      "Parameters": {
+        "error_type": "table_initialization_failure",
+        "table_name.$": "$.table_config.table_name",
+        "tenant_id.$": "$.tenant_config.tenant_id",
+        "job_id.$": "$.job_id",
+        "error_details.$": "$.error"
+      },
+      "Next": "TableProcessingFailed"
+    },
+    
+    "TableProcessingFailed": {
+      "Type": "Fail",
+      "Cause": "Table processing failed",
+      "Error": "TableProcessingFailure"
+    }
+  }
+}
