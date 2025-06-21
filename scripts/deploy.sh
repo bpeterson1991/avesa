@@ -249,6 +249,8 @@ print_status "Deploying AVESA stacks..."
 # Deploy available stacks (based on current app.py configuration)
 STACKS_TO_DEPLOY=(
     "AVESAPerformanceOptimization-$ENVIRONMENT"
+    "AVESABackfill-$ENVIRONMENT"
+    "AVESAClickHouse-$ENVIRONMENT"
 )
 
 for stack in "${STACKS_TO_DEPLOY[@]}"; do

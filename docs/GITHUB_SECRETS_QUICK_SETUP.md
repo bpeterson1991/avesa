@@ -92,13 +92,13 @@ Test the setup by running the production deployment workflow:
 
 After successful credential setup:
 
-1. Review the complete [AWS Credentials Setup Guide](AWS_CREDENTIALS_SETUP_GUIDE.md)
-2. Test a full deployment following the [Manual Deployment Guide](MANUAL_DEPLOYMENT_GUIDE.md)
+1. Review the complete [AWS Credentials Setup Guide](AWS_CREDENTIALS_GUIDE.md)
+2. Test a full deployment following the [Deployment Guide](DEPLOYMENT_GUIDE.md#manual-production-deployment)
 3. Set up monitoring and alerts per [Production Environment Setup Guide](PROD_ENVIRONMENT_SETUP_GUIDE.md)
 
 ## Support
 
 For detailed instructions and troubleshooting, see:
-- [AWS Credentials Setup Guide](AWS_CREDENTIALS_SETUP_GUIDE.md) - Complete setup instructions
-- [Manual Deployment Guide](MANUAL_DEPLOYMENT_GUIDE.md) - How to deploy to production
+- [AWS Credentials Setup Guide](AWS_CREDENTIALS_GUIDE.md) - Complete setup instructions
+- [Deployment Guide](DEPLOYMENT_GUIDE.md) - How to deploy to all environments including production
 - [Production Environment Setup Guide](PROD_ENVIRONMENT_SETUP_GUIDE.md) - Production configuration

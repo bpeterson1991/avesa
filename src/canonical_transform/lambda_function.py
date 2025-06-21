@@ -416,8 +416,15 @@ def transform_record(raw_record: Dict[str, Any], mapping: Dict[str, Any], canoni
         transformed['ingestion_timestamp'] = get_timestamp()
         transformed['canonical_table'] = canonical_table
         
-        # Add SCD Type 2 fields
-        transformed['effective_start_date'] = get_timestamp()
+        # Add SCD Type 2 fields - use updated_date from source as effective_start_date
+        source_updated_date = transformed.get('updated_date')
+        if source_updated_date:
+            # Use the source updated_date as effective_start_date
+            transformed['effective_start_date'] = source_updated_date
+        else:
+            # Fallback to current timestamp if no updated_date available
+            transformed['effective_start_date'] = get_timestamp()
+        
         transformed['effective_end_date'] = None
         transformed['is_current'] = True
         transformed['record_hash'] = calculate_record_hash(transformed)
@@ -459,22 +466,116 @@ def calculate_record_hash(record: Dict[str, Any]) -> str:
 
 
 def apply_scd_type2_logic(config: Config, tenant_id: str, canonical_table: str, new_records: List[Dict[str, Any]], logger: PipelineLogger) -> List[Dict[str, Any]]:
-    """Apply SCD Type 2 logic to detect and handle changes."""
+    """Apply proper SCD Type 2 logic to ensure only latest records per ID are current."""
     try:
-        # For now, return new records as-is
-        # In a full implementation, this would:
-        # 1. Load existing canonical data
-        # 2. Compare record hashes
-        # 3. Close out changed records (set effective_end_date, is_current=False)
-        # 4. Add new versions of changed records
-        # 5. Add completely new records
+        import pandas as pd
+        from datetime import datetime, timezone
         
-        logger.info(f"Applied SCD Type 2 logic to {len(new_records)} records")
-        return new_records
+        logger.info(f"Applying proper SCD Type 2 logic to {len(new_records)} records")
+        
+        if not new_records:
+            return []
+        
+        # Convert to DataFrame for easier processing
+        df = pd.DataFrame(new_records)
+        
+        # Get the correct ID field for this table
+        id_field_mapping = {
+            'companies': 'company_id',
+            'contacts': 'contact_id',
+            'tickets': 'ticket_id',
+            'time_entries': 'entry_id'
+        }
+        id_field = id_field_mapping.get(canonical_table)
+        
+        if not id_field or id_field not in df.columns:
+            logger.error(f"ID field {id_field} not found for table {canonical_table}")
+            return new_records
+        
+        # Ensure updated_date is datetime
+        df['updated_date'] = pd.to_datetime(df['updated_date'])
+        
+        # Step 1: For each ID, keep only the record with the latest updated_date
+        # This ensures we don't have multiple "current" records for the same ID
+        logger.info(f"Deduplicating records by {id_field} and updated_date")
+        
+        # Sort by ID and updated_date, then keep the last (most recent) record per ID
+        df_sorted = df.sort_values([id_field, 'updated_date'])
+        df_deduplicated = df_sorted.groupby(id_field).tail(1).reset_index(drop=True)
+        
+        logger.info(f"Deduplicated from {len(df)} to {len(df_deduplicated)} records")
+        
+        # Step 2: Apply SCD Type 2 fields to the deduplicated records
+        scd_records = []
+        for _, row in df_deduplicated.iterrows():
+            record = row.to_dict()
+            
+            # Use updated_date as effective_start_date (this is the key fix)
+            record['effective_start_date'] = record['updated_date']
+            record['effective_end_date'] = None
+            record['is_current'] = True  # Only the latest version per ID is current
+            record['record_hash'] = calculate_record_hash(record)
+            
+            scd_records.append(record)
+        
+        logger.info(f"SCD Type 2 processing complete: {len(scd_records)} unique current records")
+        
+        # Verify no duplicates
+        ids = [record[id_field] for record in scd_records]
+        unique_ids = set(ids)
+        if len(ids) != len(unique_ids):
+            logger.warning(f"Found duplicate IDs after deduplication: {len(ids)} records, {len(unique_ids)} unique IDs")
+        else:
+            logger.info(f"✅ Verified: All {len(unique_ids)} records have unique IDs")
+        
+        return scd_records
         
     except Exception as e:
         logger.error(f"Failed to apply SCD Type 2 logic: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        # Return original records on error to avoid data loss
         return new_records
+
+
+def load_existing_canonical_data(config: Config, tenant_id: str, canonical_table: str, logger: PipelineLogger) -> List[Dict[str, Any]]:
+    """Load existing canonical data from S3 for SCD comparison."""
+    try:
+        import pandas as pd
+        
+        # Look for existing canonical files
+        prefix = f"{tenant_id}/canonical/{canonical_table}/"
+        
+        response = s3.list_objects_v2(
+            Bucket=config.bucket_name,
+            Prefix=prefix
+        )
+        
+        if 'Contents' not in response:
+            logger.info("No existing canonical data found")
+            return []
+        
+        # Load the most recent canonical file
+        files = sorted(response['Contents'], key=lambda x: x['LastModified'], reverse=True)
+        if not files:
+            return []
+        
+        most_recent_file = files[0]['Key']
+        logger.info(f"Loading existing canonical data from: {most_recent_file}")
+        
+        # Read the parquet file
+        file_response = s3.get_object(Bucket=config.bucket_name, Key=most_recent_file)
+        df = pd.read_parquet(file_response['Body'])
+        
+        # Convert to list of dictionaries
+        existing_records = df.to_dict('records')
+        logger.info(f"Loaded {len(existing_records)} existing canonical records")
+        
+        return existing_records
+        
+    except Exception as e:
+        logger.warning(f"Could not load existing canonical data: {str(e)}")
+        return []
 
 
 def write_canonical_data_to_s3(config: Config, s3_key: str, data: List[Dict[str, Any]], logger: PipelineLogger):

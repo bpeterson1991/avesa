@@ -11,6 +11,7 @@ from aws_cdk import (
     RemovalPolicy,
     aws_lambda as _lambda,
     aws_dynamodb as dynamodb,
+    aws_s3 as s3,
     aws_stepfunctions as sfn,
     aws_stepfunctions_tasks as sfn_tasks,
     aws_iam as iam,
@@ -55,7 +56,10 @@ class PerformanceOptimizationStack(Stack):
         self.last_updated_table_name = last_updated_table_name
         self.timestamp = str(int(time.time()))
 
-        # Create or import base DynamoDB tables
+        # Create S3 bucket for data storage
+        self.data_bucket = self._create_data_bucket()
+
+        # Create base DynamoDB tables
         self.tenant_services_table = self._create_tenant_services_table()
         self.last_updated_table = self._create_last_updated_table()
         
@@ -76,35 +80,72 @@ class PerformanceOptimizationStack(Stack):
         # Create EventBridge rules for scheduling
         self._create_scheduled_rules()
 
+    def _create_data_bucket(self) -> s3.Bucket:
+        """Create S3 bucket for data storage."""
+        bucket = s3.Bucket(
+            self,
+            "DataBucket",
+            bucket_name=self.data_bucket_name,
+            versioned=True,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            removal_policy=RemovalPolicy.RETAIN,  # Keep data safe in production
+            lifecycle_rules=[
+                s3.LifecycleRule(
+                    id="DeleteIncompleteMultipartUploads",
+                    abort_incomplete_multipart_upload_after=Duration.days(7)
+                )
+            ]
+        )
+        return bucket
+
     def _create_processing_jobs_table(self) -> dynamodb.Table:
-        """Import existing DynamoDB table for tracking processing jobs."""
+        """Create DynamoDB table for tracking processing jobs."""
         table_name = f"ProcessingJobs-{self.env_name}"
         
-        # Import existing table instead of creating new one
-        table = dynamodb.Table.from_table_name(
+        table = dynamodb.Table(
             self,
             "ProcessingJobsTable",
-            table_name=table_name
+            table_name=table_name,
+            partition_key=dynamodb.Attribute(
+                name="job_id",
+                type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="tenant_id",
+                type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            removal_policy=RemovalPolicy.RETAIN,
+            point_in_time_recovery=True
         )
-        
         return table
 
     def _create_chunk_progress_table(self) -> dynamodb.Table:
-        """Import existing DynamoDB table for tracking chunk processing progress."""
+        """Create DynamoDB table for tracking chunk processing progress."""
         table_name = f"ChunkProgress-{self.env_name}"
         
-        # Import existing table instead of creating new one
-        table = dynamodb.Table.from_table_name(
+        table = dynamodb.Table(
             self,
             "ChunkProgressTable",
-            table_name=table_name
+            table_name=table_name,
+            partition_key=dynamodb.Attribute(
+                name="job_id",
+                type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="chunk_id",
+                type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            removal_policy=RemovalPolicy.RETAIN,
+            point_in_time_recovery=True
         )
-        
         return table
 
     def _create_tenant_services_table(self) -> dynamodb.Table:
         """
-        Import existing DynamoDB table for tenant service configuration.
+        Create DynamoDB table for tenant service configuration.
         
         Complete Schema:
         - Partition Key: tenant_id (STRING) - Identifies the tenant organization
@@ -120,26 +161,53 @@ class PerformanceOptimizationStack(Stack):
         """
         table_name = self.tenant_services_table_name
         
-        # Import existing table instead of creating new one
-        table = dynamodb.Table.from_table_name(
+        table = dynamodb.Table(
             self,
             "TenantServicesTable",
-            table_name=table_name
+            table_name=table_name,
+            partition_key=dynamodb.Attribute(
+                name="tenant_id",
+                type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="service",
+                type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            removal_policy=RemovalPolicy.RETAIN,  # Keep data safe in production
+            point_in_time_recovery=True
         )
-        
         return table
 
     def _create_last_updated_table(self) -> dynamodb.Table:
-        """Import existing DynamoDB table for tracking last updated timestamps."""
+        """
+        Create DynamoDB table for tracking last updated timestamps.
+        
+        Schema:
+        - Partition Key: tenant_id (STRING) - Identifies the tenant
+        - Sort Key: table_name (STRING) - Identifies the specific table/endpoint
+        
+        This table tracks incremental sync timestamps for each tenant/table combination
+        to enable efficient incremental data processing.
+        """
         table_name = self.last_updated_table_name
         
-        # Import existing table instead of creating new one
-        table = dynamodb.Table.from_table_name(
+        table = dynamodb.Table(
             self,
             "LastUpdatedTable",
-            table_name=table_name
+            table_name=table_name,
+            partition_key=dynamodb.Attribute(
+                name="tenant_id",
+                type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="table_name",
+                type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            removal_policy=RemovalPolicy.RETAIN,  # Keep data safe in production
+            point_in_time_recovery=True
         )
-        
         return table
 
     def _create_lambda_execution_role(self) -> iam.Role:
@@ -200,8 +268,8 @@ class PerformanceOptimizationStack(Stack):
                         "s3:ListBucket"
                     ],
                     resources=[
-                        f"arn:aws:s3:::{self.data_bucket_name}",
-                        f"arn:aws:s3:::{self.data_bucket_name}/*"
+                        self.data_bucket.bucket_arn,
+                        f"{self.data_bucket.bucket_arn}/*"
                     ]
                 ),
                 # CloudWatch permissions
@@ -307,7 +375,7 @@ class PerformanceOptimizationStack(Stack):
         
         # Common environment variables
         common_env = {
-            "BUCKET_NAME": self.data_bucket_name,
+            "BUCKET_NAME": self.data_bucket.bucket_name,
             "TENANT_SERVICES_TABLE": self.tenant_services_table.table_name,
             "LAST_UPDATED_TABLE": self.last_updated_table.table_name,
             "ENVIRONMENT": self.env_name,

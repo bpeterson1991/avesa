@@ -1,0 +1,123 @@
+{
+  "dashboards": {
+    "clickhouse_overview": {
+      "name": "ClickHouse Multi-Tenant Overview",
+      "widgets": [
+        {
+          "type": "metric",
+          "properties": {
+            "metrics": [
+              ["AWS/Lambda", "Invocations", "FunctionName", "clickhouse-schema-init"],
+              ["AWS/Lambda", "Errors", "FunctionName", "clickhouse-schema-init"],
+              ["AWS/Lambda", "Duration", "FunctionName", "clickhouse-schema-init"]
+            ],
+            "period": 300,
+            "stat": "Sum",
+            "region": "us-east-2",
+            "title": "Schema Initialization Lambda"
+          }
+        },
+        {
+          "type": "metric",
+          "properties": {
+            "metrics": [
+              ["AWS/Lambda", "Invocations", "FunctionName", "clickhouse-loader-companies"],
+              ["AWS/Lambda", "Invocations", "FunctionName", "clickhouse-loader-contacts"],
+              ["AWS/Lambda", "Invocations", "FunctionName", "clickhouse-loader-tickets"],
+              ["AWS/Lambda", "Invocations", "FunctionName", "clickhouse-loader-time-entries"]
+            ],
+            "period": 300,
+            "stat": "Sum",
+            "region": "us-east-2",
+            "title": "Data Loader Lambda Invocations"
+          }
+        },
+        {
+          "type": "metric",
+          "properties": {
+            "metrics": [
+              ["AWS/StepFunctions", "ExecutionStarted", "StateMachineArn", "clickhouse-data-pipeline"],
+              ["AWS/StepFunctions", "ExecutionSucceeded", "StateMachineArn", "clickhouse-data-pipeline"],
+              ["AWS/StepFunctions", "ExecutionFailed", "StateMachineArn", "clickhouse-data-pipeline"]
+            ],
+            "period": 300,
+            "stat": "Sum",
+            "region": "us-east-2",
+            "title": "Step Functions Executions"
+          }
+        }
+      ]
+    }
+  },
+  "alarms": {
+    "lambda_errors": {
+      "name": "ClickHouse Lambda Errors",
+      "description": "Alert when ClickHouse Lambda functions have errors",
+      "metric_name": "Errors",
+      "namespace": "AWS/Lambda",
+      "statistic": "Sum",
+      "period": 300,
+      "evaluation_periods": 1,
+      "threshold": 1,
+      "comparison_operator": "GreaterThanOrEqualToThreshold",
+      "treat_missing_data": "notBreaching"
+    },
+    "step_functions_failures": {
+      "name": "ClickHouse Step Functions Failures",
+      "description": "Alert when ClickHouse Step Functions fail",
+      "metric_name": "ExecutionFailed",
+      "namespace": "AWS/StepFunctions",
+      "statistic": "Sum",
+      "period": 300,
+      "evaluation_periods": 1,
+      "threshold": 1,
+      "comparison_operator": "GreaterThanOrEqualToThreshold",
+      "treat_missing_data": "notBreaching"
+    },
+    "api_high_latency": {
+      "name": "ClickHouse API High Latency",
+      "description": "Alert when API response time is high",
+      "metric_name": "Duration",
+      "namespace": "AWS/ApiGateway",
+      "statistic": "Average",
+      "period": 300,
+      "evaluation_periods": 2,
+      "threshold": 5000,
+      "comparison_operator": "GreaterThanThreshold",
+      "treat_missing_data": "notBreaching"
+    }
+  },
+  "log_groups": {
+    "lambda_logs": [
+      "/aws/lambda/clickhouse-schema-init",
+      "/aws/lambda/clickhouse-loader-companies",
+      "/aws/lambda/clickhouse-loader-contacts", 
+      "/aws/lambda/clickhouse-loader-tickets",
+      "/aws/lambda/clickhouse-loader-time-entries",
+      "/aws/lambda/clickhouse-scd-processor"
+    ],
+    "step_functions_logs": [
+      "/aws/stepfunctions/clickhouse-pipeline"
+    ],
+    "api_logs": [
+      "/aws/apigateway/clickhouse-api"
+    ]
+  },
+  "custom_metrics": {
+    "tenant_isolation_violations": {
+      "namespace": "ClickHouse/Security",
+      "metric_name": "TenantIsolationViolations",
+      "description": "Number of tenant isolation violations detected"
+    },
+    "data_quality_issues": {
+      "namespace": "ClickHouse/DataQuality", 
+      "metric_name": "DataQualityIssues",
+      "description": "Number of data quality issues detected"
+    },
+    "scd_integrity_issues": {
+      "namespace": "ClickHouse/SCD",
+      "metric_name": "SCDIntegrityIssues", 
+      "description": "Number of SCD Type 2 integrity issues"
+    }
+  }
+}

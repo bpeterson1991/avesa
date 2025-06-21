@@ -180,11 +180,10 @@ avesa/
 │   └── optimized-processors.zip      # ⭐ Optimized components
 │
 ├── docs/                             # 📚 Documentation
-│   ├── DEPLOYMENT.md                 # Deployment guide
+│   ├── DEPLOYMENT_GUIDE.md           # Comprehensive deployment guide
 │   ├── PERFORMANCE_OPTIMIZATION_ARCHITECTURE.md # Architecture details
-│   ├── DEV_ENVIRONMENT_SETUP_GUIDE.md # Development setup
-│   ├── MANUAL_DEPLOYMENT_GUIDE.md    # Manual deployment procedures
-│   ├── AWS_CREDENTIALS_SETUP_GUIDE.md # AWS credentials setup
+│   ├── AWS_CREDENTIALS_GUIDE.md      # AWS credentials setup
+│   ├── CLICKHOUSE_GUIDE.md           # ClickHouse implementation guide
 │   ├── GITHUB_SECRETS_QUICK_SETUP.md # GitHub Actions setup
 │   ├── PERFORMANCE_MONITORING_STRATEGY.md # Monitoring setup
 │   ├── BACKFILL_STRATEGY.md          # Data backfill procedures
@@ -330,10 +329,9 @@ s3://{bucket}/{tenant_id}/canonical/{canonical_table}/{timestamp}.parquet
 ## Documentation Index
 
 ### Setup and Deployment
-- [**Deployment Guide**](docs/DEPLOYMENT.md) - Complete deployment procedures
-- [**Dev Environment Setup**](docs/DEV_ENVIRONMENT_SETUP_GUIDE.md) - Development environment configuration
-- [**Manual Deployment Guide**](docs/MANUAL_DEPLOYMENT_GUIDE.md) - Manual deployment procedures
-- [**AWS Credentials Setup**](docs/AWS_CREDENTIALS_SETUP_GUIDE.md) - AWS credentials configuration
+- [**Deployment Guide**](docs/DEPLOYMENT_GUIDE.md) - Complete deployment procedures for all environments
+- [**AWS Credentials Setup**](docs/AWS_CREDENTIALS_GUIDE.md) - AWS credentials configuration and troubleshooting
+- [**ClickHouse Guide**](docs/CLICKHOUSE_GUIDE.md) - ClickHouse implementation and deployment
 - [**GitHub Secrets Setup**](docs/GITHUB_SECRETS_QUICK_SETUP.md) - GitHub Actions configuration
 
 ### Architecture and Implementation

@@ -9,11 +9,9 @@ import os
 import json
 import boto3
 from aws_cdk import App, Environment
-from stacks.data_pipeline_stack import DataPipelineStack
-from stacks.monitoring_stack import MonitoringStack
 from stacks.backfill_stack import BackfillStack
-from stacks.cross_account_monitoring import CrossAccountMonitoringStack
 from stacks.performance_optimization_stack import PerformanceOptimizationStack
+from stacks.clickhouse_stack import ClickHouseStack
 
 app = App()
 
@@ -127,6 +125,50 @@ backfill_stack = BackfillStack(
     lambda_timeout=env_config["lambda_timeout"]
 )
 
-# Skip other stacks for now - focus on performance and backfill deployment
+# Deploy ClickHouse stack for multi-tenant analytics
+clickhouse_stack = ClickHouseStack(
+    app,
+    f"AVESAClickHouse{env_config['table_suffix']}",
+    env=env,
+    environment=environment,
+    data_bucket_name=env_config["bucket_name"],
+    tenant_services_table_name=f"TenantServices{env_config['table_suffix']}",
+    last_updated_table_name=f"LastUpdated{env_config['table_suffix']}"
+)
+
+# CONSOLIDATED INFRASTRUCTURE ARCHITECTURE:
+#
+# ACTIVE STACKS (3):
+# 1. PerformanceOptimizationStack - Consolidated core data pipeline including:
+#    - DynamoDB tables (TenantServices, LastUpdated, ProcessingJobs, ChunkProgress)
+#    - S3 data bucket with lifecycle management
+#    - Step Functions orchestration for optimized processing
+#    - Lambda functions for data ingestion and transformation
+#    - IAM roles and policies for secure access
+#
+# 2. BackfillStack - Historical data processing and tenant onboarding:
+#    - Backfill orchestration for new tenant onboarding
+#    - Historical data migration capabilities
+#    - Batch processing for large datasets
+#
+# 3. ClickHouseStack - Multi-tenant analytics database and API layer:
+#    - ClickHouse Cloud integration for real-time analytics
+#    - Multi-tenant data isolation and security
+#    - REST API for data access and querying
+#    - Schema management and migration tools
+#
+# REMOVED STACKS (Consolidated into PerformanceOptimizationStack):
+# - DataPipelineStack - DynamoDB tables and S3 bucket moved to PerformanceOptimizationStack
+# - MonitoringStack - Monitoring functionality integrated into PerformanceOptimizationStack
+#
+# ARCHIVED STACKS (moved to infrastructure/stacks/archive/):
+# - CrossAccountMonitoringStack - Future multi-account deployment monitoring
+#
+# This consolidated three-stack architecture provides:
+# - Unified resource management with reduced complexity
+# - Scalable data ingestion and transformation
+# - Historical data processing capabilities
+# - Real-time analytics and multi-tenant data access
+# - Simplified deployment and maintenance
 
 app.synth()

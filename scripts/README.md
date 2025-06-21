@@ -2,10 +2,224 @@
 
 This directory contains automated scripts for setting up and managing the AVESA Multi-Tenant Data Pipeline optimized infrastructure.
 
-**Last Updated:** December 19, 2025
-**Status:** Final cleanup completed - optimized for day-to-day operations
+**Last Updated:** June 21, 2025
+**Status:** Phase 4 Scripts Reorganization completed - 59% reduction in /scripts directory, proper separation of concerns
+
+## Recently Completed: Phase 4 Scripts Reorganization ✅
+
+**MAJOR CLEANUP COMPLETED:** Comprehensive script consolidation and reorganization reducing maintenance overhead by 59%.
+
+### Reorganization Summary:
+- **Started with:** 39 scripts in `/scripts`
+- **Removed:** 16 obsolete/completed scripts
+- **Moved to /tmp:** 2 one-time setup scripts
+- **Moved to /tests:** 8 test/validation scripts
+- **Moved to /tools:** 1 rebuild/utility script
+- **Consolidated:** 8 scripts → 3 unified scripts
+- **Final `/scripts` count:** 16 scripts (59% reduction from original 39)
+
+### Directory Structure:
+- **[`/scripts`](.)** - Core operational scripts (deployment, setup, data loading)
+- **[`/tests`](../tests/)** - All testing, validation, and verification scripts
+- **[`/tools`](../tools/)** - Rebuild utilities and development tools
+- **`/tmp`** - One-time setup scripts (completed)
+
+### Phase 3 Consolidation Details:
+
+#### 🗑️ **Removed Scripts (16 total):**
+**Obsolete/Completed Tasks:**
+- `complete-data-loading.py` - Task completed
+- `run-schema-migration.py` - Superseded by unified schema manager
+- `migrate-companies-schema.sql` - Migration completed
+- `fix-canonical-scd-transform.py` - Fix applied
+- `configure-clickhouse-s3.py` - Security risk, superseded by secure version
+- `validate-infrastructure-consolidation.py` - Consolidation completed
+
+**Server Startup Scripts (consolidated):**
+- `start-api-server.sh` → [`start-development-environment.sh`](start-development-environment.sh)
+- `start-dev-servers.sh` → [`start-development-environment.sh`](start-development-environment.sh)
+- `start-fullstack.sh` → [`start-development-environment.sh`](start-development-environment.sh)
+- `start-working-servers.sh` → [`start-development-environment.sh`](start-development-environment.sh)
+
+**Validation Scripts (consolidated):**
+- `complete-end-to-end-validation.py` → [`validate-pipeline.py`](validate-pipeline.py)
+- `final-pipeline-validation.py` → [`validate-pipeline.py`](validate-pipeline.py)
+
+**Schema Management Scripts (consolidated):**
+- `aws-clickhouse-schema-migration.py` → [`manage-clickhouse-schema.py`](manage-clickhouse-schema.py)
+- `comprehensive-schema-migration.py` → [`manage-clickhouse-schema.py`](manage-clickhouse-schema.py)
+
+#### 📦 **Moved to /tmp (2 total):**
+- `setup-clickhouse-iam.py` - One-time setup completed
+- `setup-credential-rotation.py` - Optional feature, rarely used
+
+#### ⭐ **New Unified Scripts (3 total):**
+1. **[`start-development-environment.sh`](start-development-environment.sh)** - Unified development server launcher
+2. **[`manage-clickhouse-schema.py`](manage-clickhouse-schema.py)** - Unified ClickHouse schema management
+
+#### 📦 **Scripts Moved to New Directories (9 total):**
+**Moved to [`/tests`](../tests/):**
+- `validate-pipeline.py` → [`tests/validate-pipeline.py`](../tests/validate-pipeline.py) - Comprehensive validation suite
+- `end-to-end-pipeline-test.py` → [`tests/end-to-end-pipeline-test.py`](../tests/end-to-end-pipeline-test.py)
+- `targeted-pipeline-test.py` → [`tests/targeted-pipeline-test.py`](../tests/targeted-pipeline-test.py)
+- `test_clickhouse_connection.py` → [`tests/test_clickhouse_connection.py`](../tests/test_clickhouse_connection.py)
+- `test-api-endpoints.py` → [`tests/test-api-endpoints.py`](../tests/test-api-endpoints.py)
+- `validate-dependency-standardization.py` → [`tests/validate-dependency-standardization.py`](../tests/validate-dependency-standardization.py)
+- `validate-security-setup.py` → [`tests/validate-security-setup.py`](../tests/validate-security-setup.py)
+- `verify-clickhouse-deployment.py` → [`tests/verify-clickhouse-deployment.py`](../tests/verify-clickhouse-deployment.py)
+
+**Moved to [`/tools`](../tools/):**
+- `rebuild-clickhouse-lambdas.py` → [`tools/rebuild-clickhouse-lambdas.py`](../tools/rebuild-clickhouse-lambdas.py)
+
+### Previous Phase 2 Consolidation:
+
+**MAJOR CLEANUP COMPLETED:** Consolidated 8+ duplicate load-canonical-data scripts into a single, configurable script.
+
+### Before Consolidation:
+- `load-canonical-data.py` (base version)
+- `load-canonical-data-simple.py` (simplified approach)
+- `load-canonical-data-direct.py` (direct loading approach)
+- `load-canonical-data-with-creds.py` (with credentials handling)
+- `load-canonical-data-with-schema-mapping.py` (with schema mapping)
+- `load-canonical-data-corrected.py` (corrected version)
+- `load-canonical-data-fixed.py` (fixed version)
+- `load-canonical-data-python.py` (python-specific version)
+
+### After Consolidation:
+- **Single consolidated script:** [`load-canonical-data.py`](load-canonical-data.py) ⭐ **CONSOLIDATED LOADER**
+
+**Backup Location:** All original scripts moved to `/tmp/avesa-script-cleanup-backup/` for safety.
+
+## New Unified Scripts ⭐
+
+### Development Environment Management
+
+#### [`start-development-environment.sh`](start-development-environment.sh) ⭐ **UNIFIED DEVELOPMENT LAUNCHER**
+Consolidated development server startup script with multiple modes.
+
+```bash
+# Start with real ClickHouse data (recommended for testing)
+./scripts/start-development-environment.sh real
+
+# Start with mock data (fastest for frontend development)
+./scripts/start-development-environment.sh mock
+
+# Start API server only with real ClickHouse data
+./scripts/start-development-environment.sh api-only
+
+# Start full-stack with hot reload (best for development)
+./scripts/start-development-environment.sh frontend
+```
+
+**Features:**
+- **4 Launch Modes:** Real data, mock data, API-only, and frontend development
+- **AWS Credential Management:** Automatic AWS profile detection and configuration
+- **Dependency Installation:** Automatic npm dependency installation
+- **Process Management:** Graceful startup, monitoring, and cleanup
+- **Error Handling:** Fallback to mock server if real ClickHouse fails
+- **Browser Integration:** Automatic browser opening on macOS
+
+**Replaces 4 Previous Scripts:**
+- `start-api-server.sh` - API server with real ClickHouse data
+- `start-dev-servers.sh` - Simple development server startup
+- `start-fullstack.sh` - Full-stack development with hot reload
+- `start-working-servers.sh` - Mock API and React frontend
+
+### Pipeline Validation
+
+#### [`validate-pipeline.py`](validate-pipeline.py) ⭐ **COMPREHENSIVE VALIDATION SUITE**
+Unified pipeline validation script with multiple validation modes.
+
+```bash
+# Full validation (recommended for production readiness)
+python scripts/validate-pipeline.py --mode full
+
+# Quick health checks (fast connectivity tests)
+python scripts/validate-pipeline.py --mode quick
+
+# Data integrity focus (SCD validation, multi-tenant isolation)
+python scripts/validate-pipeline.py --mode data
+
+# Performance metrics (query performance, response times)
+python scripts/validate-pipeline.py --mode performance
+```
+
+**Features:**
+- **4 Validation Modes:** Full, quick, data-focused, and performance testing
+- **ClickHouse Integration:** Direct ClickHouse connectivity and data validation
+- **API Testing:** Comprehensive API endpoint validation
+- **Frontend Validation:** React application connectivity testing
+- **Multi-tenant Testing:** Tenant isolation and data integrity validation
+- **Comprehensive Reporting:** JSON reports with detailed metrics and timestamps
+
+**Replaces 2 Previous Scripts:**
+- `complete-end-to-end-validation.py` - End-to-end pipeline validation
+- `final-pipeline-validation.py` - Final validation with reporting
+
+### Schema Management
+
+#### [`manage-clickhouse-schema.py`](manage-clickhouse-schema.py) ⭐ **UNIFIED SCHEMA MANAGER**
+Comprehensive ClickHouse schema management with multiple operation modes.
+
+```bash
+# Migrate schema to match canonical mappings (recommended)
+python scripts/manage-clickhouse-schema.py --mode migrate --credentials aws
+
+# Validate current schema against mappings
+python scripts/manage-clickhouse-schema.py --mode validate --credentials aws
+
+# Analyze schema differences and generate reports
+python scripts/manage-clickhouse-schema.py --mode analyze --credentials aws
+
+# Use environment variables for credentials instead of AWS Secrets Manager
+python scripts/manage-clickhouse-schema.py --mode migrate --credentials env
+```
+
+**Features:**
+- **4 Operation Modes:** Migrate, validate, analyze, and initialize
+- **Dual Credential Support:** AWS Secrets Manager or environment variables
+- **Intelligent Type Mapping:** Automatic ClickHouse type determination
+- **Schema Analysis:** Detailed difference analysis and reporting
+- **Data Integrity Validation:** SCD Type 2 validation and record counting
+- **Utility Creation:** Automatic schema status views and analysis tools
+
+**Replaces 2 Previous Scripts:**
+- `aws-clickhouse-schema-migration.py` - AWS Secrets Manager schema migration
+- `comprehensive-schema-migration.py` - Environment variable schema migration
 
 ## Currently Active Scripts
+
+### Data Loading Scripts
+
+#### [`load-canonical-data.py`](load-canonical-data.py) ⭐ **CONSOLIDATED CANONICAL DATA LOADER**
+Consolidated ClickHouse canonical data loader with multiple approaches.
+
+```bash
+# Most reliable approach (recommended)
+python scripts/load-canonical-data.py --mode python --tenant-id sitetechnology
+
+# Fastest approach (if ClickHouse has S3 access)
+python scripts/load-canonical-data.py --mode direct --with-creds
+
+# Clear existing data first
+python scripts/load-canonical-data.py --mode python --clear-existing
+
+# Dry run to see what would be done
+python scripts/load-canonical-data.py --mode python --dry-run
+```
+
+**Features:**
+- **2 Loading Modes:** Direct (ClickHouse S3 function) and Python (download & insert)
+- **Configurable Options:** Credentials, tenant selection, data clearing
+- **Proper Null Handling:** Safe data type conversion for ClickHouse compatibility
+- **Comprehensive Logging:** Detailed progress and error reporting
+- **Dry Run Support:** Preview operations without executing
+
+**Consolidates 8 Previous Scripts:**
+- Combines all functionality from duplicate scripts
+- Simplified command-line interface
+- Maintains backward compatibility for all use cases
+- Reduces maintenance overhead by 87.5% (8 scripts → 1 script)
 
 ### Core Deployment Scripts
 
@@ -414,11 +628,11 @@ For issues with these scripts:
 
 ### Related Documentation
 
-- [Deployment Guide (Updated)](../docs/DEPLOYMENT.md) - Optimized deployment procedures
-- [Dev Environment Setup (Updated)](../docs/DEV_ENVIRONMENT_SETUP_GUIDE.md) - Optimized development setup
+- [Deployment Guide (Updated)](../docs/DEPLOYMENT_GUIDE.md) - Optimized deployment procedures
+- [Dev Environment Setup (Updated)](../docs/DEPLOYMENT_GUIDE.md#development-environment-setup) - Optimized development setup
 - [Migration Strategy (Completed)](../docs/MIGRATION_STRATEGY.md) - Migration completion details
 - [Phase 1 Implementation (Completed)](../docs/PHASE_1_IMPLEMENTATION_README.md) - Implementation status
-- [AWS Credentials Setup Guide](../docs/AWS_CREDENTIALS_SETUP_GUIDE.md)
+- [AWS Credentials Setup Guide](../docs/AWS_CREDENTIALS_GUIDE.md)
 - [GitHub Secrets Quick Setup](../docs/GITHUB_SECRETS_QUICK_SETUP.md)
 - [sts:TagSession Permission Fix](../docs/STS_TAGSESSION_FIX.md)
 - [Production Environment Setup](../docs/PROD_ENVIRONMENT_SETUP_GUIDE.md)

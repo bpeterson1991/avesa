@@ -1,20 +1,22 @@
-# AWS CDK
+# AWS CDK - Aligned with infrastructure requirements
+# Version 2.100.0+ provides stable CDK features used across the project
 aws-cdk-lib>=2.100.0
 constructs>=10.0.0
 
-# Lambda Dependencies
-boto3>=1.34.0
-pandas>=2.0.0
-pyarrow>=14.0.0
+# Lambda Dependencies - Standardized across all Lambda functions
+# boto3 1.38.39 is the latest stable version used in all Lambda functions
+boto3>=1.38.39
+pandas>=2.2.3
+pyarrow>=18.1.0
 requests>=2.31.0
 
-# Development Dependencies
+# Development Dependencies - Latest stable versions for development workflow
 pytest>=7.4.0
 pytest-mock>=3.11.0
 black>=23.0.0
 flake8>=6.0.0
 mypy>=1.5.0
 
-# Utilities
+# Utilities - Core utilities for configuration and data validation
 python-dotenv>=1.0.0
 pydantic>=2.0.0

@@ -175,3 +175,13 @@ credentials.json
 # Local configuration
 local_config.json
 .env.local
+
+# Lambda packages and build artifacts
+lambda-packages/
+*.zip
+
+# Build outputs and deployment artifacts
+dist/
+build/
+.build/
+.deploy/

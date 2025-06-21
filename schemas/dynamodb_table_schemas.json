@@ -22,34 +22,30 @@
     }
   },
   "naming_issues": {
-    "production_tables_missing_suffix": [
-      "BackfillJobs",
-      "LastUpdated", 
-      "TenantServices"
-    ],
+    "production_tables_missing_suffix": [],
     "production_tables_correct_naming": [
+      "BackfillJobs-prod",
       "ChunkProgress-prod",
-      "ProcessingJobs-prod"
+      "LastUpdated-prod",
+      "ProcessingJobs-prod",
+      "TenantServices-prod"
     ]
   },
   "schema_issues": {
-    "TenantServices": {
-      "issue": "Production table missing critical 'secret_name' field",
-      "dev_schema": {
-        "tenant_id": "S",
-        "service": "S",
-        "enabled": "BOOL",
-        "secret_name": "S"
-      },
-      "prod_schema": {
-        "tenant_id": "S",
-        "service": "S", 
-        "enabled": "BOOL",
-        "updated_at": "S",
-        "created_at": "S",
-        "company_name": "S"
-      },
-      "required_fix": "Add secret_name field to production data"
+    "resolved": {
+      "TenantServices": {
+        "issue": "Production table missing critical 'secret_name' field - RESOLVED",
+        "resolution": "secret_name field added to required_attributes in schema definition",
+        "unified_schema": {
+          "tenant_id": "S",
+          "service": "S",
+          "enabled": "BOOL",
+          "secret_name": "S",
+          "updated_at": "S",
+          "created_at": "S",
+          "company_name": "S"
+        }
+      }
     }
   },
   "table_schemas": {

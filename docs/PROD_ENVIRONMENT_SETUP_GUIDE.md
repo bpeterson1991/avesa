@@ -1,6 +1,6 @@
 # AVESA Production Environment Setup Guide
 
-This guide provides comprehensive instructions for setting up, configuring, and managing the AVESA data pipeline in the production environment. This guide complements the [`DEV_ENVIRONMENT_SETUP_GUIDE.md`](DEV_ENVIRONMENT_SETUP_GUIDE.md) and follows production security best practices.
+This guide provides comprehensive instructions for setting up, configuring, and managing the AVESA data pipeline in the production environment. This guide complements the [Deployment Guide](DEPLOYMENT_GUIDE.md#development-environment-setup) and follows production security best practices.
 
 ## Overview
 
@@ -889,7 +889,7 @@ aws s3api put-bucket-lifecycle-configuration \
 
 ### 1. Cross-Account Access
 
-Reference the [`DEPLOYMENT.md`](DEPLOYMENT.md) for detailed deployment procedures and the [`DEV_ENVIRONMENT_SETUP_GUIDE.md`](DEV_ENVIRONMENT_SETUP_GUIDE.md) for development environment setup.
+Reference the [Deployment Guide](DEPLOYMENT_GUIDE.md) for detailed deployment procedures and development environment setup.
 
 #### Development to Production Promotion
 
@@ -930,7 +930,7 @@ python scripts/compare-environments.py \
 
 #### Critical System Failure
 
-1. **Immediate Response**: Check [`DEPLOYMENT.md`](DEPLOYMENT.md) rollback procedures
+1. **Immediate Response**: Check [Deployment Guide](DEPLOYMENT_GUIDE.md#rollback-procedures) rollback procedures
 2. **Escalation**: Contact production on-call team
 3. **Communication**: Update status page and stakeholders
 4. **Recovery**: Execute disaster recovery procedures
@@ -947,7 +947,7 @@ python scripts/compare-environments.py \
 When making changes to production:
 
 1. Update this guide with new procedures
-2. Update [`DEPLOYMENT.md`](DEPLOYMENT.md) with deployment changes
+2. Update [Deployment Guide](DEPLOYMENT_GUIDE.md) with deployment changes
 3. Document lessons learned in incident reports
 4. Review and update security procedures quarterly
 
@@ -962,6 +962,5 @@ After successful production environment setup:
 5. **Compliance Audit**: Conduct regular compliance reviews and audits
 
 For additional support and detailed deployment procedures, refer to:
-- [`DEPLOYMENT.md`](DEPLOYMENT.md) - Comprehensive deployment guide
-- [`DEV_ENVIRONMENT_SETUP_GUIDE.md`](DEV_ENVIRONMENT_SETUP_GUIDE.md) - Development environment setup
+- [Deployment Guide](DEPLOYMENT_GUIDE.md) - Comprehensive deployment guide for all environments
 - AWS documentation for service-specific configuration details
