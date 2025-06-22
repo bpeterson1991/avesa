@@ -2,7 +2,7 @@
 ClickHouse Data Loader Lambda Function
 
 This function loads data from S3 canonical files into ClickHouse shared tables.
-It handles tenant isolation, SCD Type 2 processing, and data quality validation.
+It handles tenant isolation, respects SCD type configuration, and provides data quality validation.
 """
 
 import json
@@ -14,6 +14,7 @@ from typing import Dict, Any, List, Optional
 
 # Import shared components
 from shared import ClickHouseClient, AWSClientFactory
+from shared.scd_config import SCDConfigManager, get_scd_type, is_scd_type_1, is_scd_type_2
 
 # Configure logging
 logger = logging.getLogger()
@@ -180,14 +181,29 @@ def check_if_already_processed(tenant_id: str, table_name: str, s3_files: List[D
         return False  # Assume not processed on error
 
 def load_parquet_data_via_clickhouse(client, tenant_id: str, table_name: str, s3_files: List[Dict]) -> int:
-    """Load Parquet data directly from S3 into ClickHouse using S3 table function with proper SCD Type 2 deduplication."""
+    """Load Parquet data directly from S3 into ClickHouse using appropriate SCD logic based on table configuration."""
     if not s3_files:
         logger.info(f"No files to process for {tenant_id}/{table_name}")
         return 0
     
+    # Get SCD type for this table
+    bucket_name = os.environ.get('S3_BUCKET_NAME')
+    scd_type = get_scd_type(table_name, bucket_name)
+    logger.info(f"Table {table_name} uses SCD {scd_type} processing")
+    
+    if scd_type == 'type_1':
+        return load_data_scd_type_1(client, tenant_id, table_name, s3_files)
+    else:
+        return load_data_scd_type_2(client, tenant_id, table_name, s3_files)
+
+
+def load_data_scd_type_1(client, tenant_id: str, table_name: str, s3_files: List[Dict]) -> int:
+    """Load data using SCD Type 1 logic (simple upsert)."""
     total_records = 0
     current_time = datetime.now(timezone.utc)
     current_time_str = current_time.isoformat()
+    
+    logger.info(f"Processing {len(s3_files)} files for {tenant_id}/{table_name} with SCD Type 1 logic")
     
     for file_info in s3_files:
         file_path = file_info['file_path']
@@ -197,9 +213,74 @@ def load_parquet_data_via_clickhouse(client, tenant_id: str, table_name: str, s3
             # Use ClickHouse S3 table function to read Parquet directly
             s3_url = f"s3://data-storage-msp-dev/{file_path}"
             
-            # Use atomic REPLACE operation to handle SCD Type 2 properly
-            # This prevents race conditions by doing expire + insert in a single operation
-            logger.info(f"Processing data from {file_path} with atomic SCD Type 2 logic")
+            # Create a temporary staging table for this batch
+            staging_table = f"{table_name}_staging_{int(current_time.timestamp() * 1000000)}"
+            
+            # Step 1: Create staging table with new data
+            create_staging_query = f"""
+            CREATE TABLE {staging_table} AS
+            SELECT DISTINCT
+                s.*,
+                '{tenant_id}' as tenant_id,
+                '{current_time_str}' as effective_date,
+                NULL as expiration_date,
+                true as is_current,
+                'canonical_transform' as source_system,
+                '{current_time_str}' as date_entered,
+                md5(toString(s.*)) as data_hash,
+                1 as record_version
+            FROM s3('{s3_url}', 'Parquet') s
+            """
+            
+            client.command(create_staging_query)
+            logger.info(f"Created staging table {staging_table}")
+            
+            # Step 2: For SCD Type 1, delete existing records that will be replaced
+            delete_query = f"""
+            ALTER TABLE {table_name}
+            DELETE WHERE tenant_id = '{tenant_id}'
+            AND id IN (SELECT id FROM {staging_table})
+            """
+            
+            client.command(delete_query)
+            logger.info(f"Deleted existing records for SCD Type 1 replacement")
+            
+            # Step 3: Insert all new records
+            insert_query = f"""
+            INSERT INTO {table_name}
+            SELECT * FROM {staging_table}
+            """
+            
+            result = client.command(insert_query)
+            
+            # Step 4: Clean up staging table
+            client.command(f"DROP TABLE {staging_table}")
+            
+            logger.info(f"Successfully processed data from {file_path} with SCD Type 1 logic")
+            total_records += 1
+            
+        except Exception as e:
+            logger.error(f"Failed to load {file_path}: {e}")
+            continue
+    
+    return total_records
+
+
+def load_data_scd_type_2(client, tenant_id: str, table_name: str, s3_files: List[Dict]) -> int:
+    """Load data using SCD Type 2 logic (historical versioning)."""
+    total_records = 0
+    current_time = datetime.now(timezone.utc)
+    current_time_str = current_time.isoformat()
+    
+    logger.info(f"Processing {len(s3_files)} files for {tenant_id}/{table_name} with SCD Type 2 logic")
+    
+    for file_info in s3_files:
+        file_path = file_info['file_path']
+        logger.info(f"Processing file: {file_path}")
+        
+        try:
+            # Use ClickHouse S3 table function to read Parquet directly
+            s3_url = f"s3://data-storage-msp-dev/{file_path}"
             
             # Create a temporary staging table for this batch
             staging_table = f"{table_name}_staging_{int(current_time.timestamp() * 1000000)}"
@@ -257,7 +338,7 @@ def load_parquet_data_via_clickhouse(client, tenant_id: str, table_name: str, s3
             # Step 4: Clean up staging table
             client.command(f"DROP TABLE {staging_table}")
             
-            logger.info(f"Successfully processed data from {file_path} with atomic SCD Type 2")
+            logger.info(f"Successfully processed data from {file_path} with SCD Type 2 logic")
             total_records += 1
             
         except Exception as e:

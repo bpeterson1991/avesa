@@ -35,8 +35,7 @@ try:
 except ImportError:
     PipelineDashboards = None
 
-# Import shared bundling utilities
-from infrastructure.shared.bundling_utils import BundlingOptionsFactory
+# Note: Removed bundling utilities import - using simple asset packaging for optimized functions
 
 
 class PerformanceOptimizationStack(Stack):
@@ -390,7 +389,9 @@ class PerformanceOptimizationStack(Stack):
         # Create state machines first so we can reference them
         state_machines = self._create_state_machines_early()
         
-        # Use standardized bundling options from shared utilities
+        # Use optimized bundling that includes the shared directory
+        # This eliminates file duplication while maintaining functionality
+        from infrastructure.shared.bundling_utils import BundlingOptionsFactory
 
         # Pipeline Orchestrator with STATE_MACHINE_ARN
         orchestrator_env = common_env.copy()
@@ -404,7 +405,7 @@ class PerformanceOptimizationStack(Stack):
             handler="lambda_function.lambda_handler",
             code=_lambda.Code.from_asset(
                 "../src/optimized/orchestrator",
-                bundling=BundlingOptionsFactory.get_python_bundling()
+                bundling=BundlingOptionsFactory.get_optimized_shared_bundling()
             ),
             role=self.lambda_execution_role,
             memory_size=512,
@@ -422,7 +423,7 @@ class PerformanceOptimizationStack(Stack):
             handler="tenant_processor.lambda_handler",
             code=_lambda.Code.from_asset(
                 "../src/optimized/processors",
-                bundling=BundlingOptionsFactory.get_python_bundling()
+                bundling=BundlingOptionsFactory.get_optimized_shared_bundling()
             ),
             role=self.lambda_execution_role,
             memory_size=512,
@@ -440,7 +441,7 @@ class PerformanceOptimizationStack(Stack):
             handler="table_processor.lambda_handler",
             code=_lambda.Code.from_asset(
                 "../src/optimized/processors",
-                bundling=BundlingOptionsFactory.get_python_bundling()
+                bundling=BundlingOptionsFactory.get_optimized_shared_bundling()
             ),
             role=self.lambda_execution_role,
             memory_size=512,
@@ -458,7 +459,7 @@ class PerformanceOptimizationStack(Stack):
             handler="chunk_processor.lambda_handler",
             code=_lambda.Code.from_asset(
                 "../src/optimized/processors",
-                bundling=BundlingOptionsFactory.get_python_bundling()
+                bundling=BundlingOptionsFactory.get_optimized_shared_bundling()
             ),
             role=self.lambda_execution_role,
             memory_size=1024,  # Higher memory for data processing
@@ -476,7 +477,7 @@ class PerformanceOptimizationStack(Stack):
             handler="error_handler.lambda_handler",
             code=_lambda.Code.from_asset(
                 "../src/optimized/helpers",
-                bundling=BundlingOptionsFactory.get_python_bundling()
+                bundling=BundlingOptionsFactory.get_optimized_shared_bundling()
             ),
             role=self.lambda_execution_role,
             memory_size=256,
@@ -494,7 +495,7 @@ class PerformanceOptimizationStack(Stack):
             handler="result_aggregator.lambda_handler",
             code=_lambda.Code.from_asset(
                 "../src/optimized/helpers",
-                bundling=BundlingOptionsFactory.get_python_bundling()
+                bundling=BundlingOptionsFactory.get_optimized_shared_bundling()
             ),
             role=self.lambda_execution_role,
             memory_size=512,
@@ -512,7 +513,7 @@ class PerformanceOptimizationStack(Stack):
             handler="completion_notifier.lambda_handler",
             code=_lambda.Code.from_asset(
                 "../src/optimized/helpers",
-                bundling=BundlingOptionsFactory.get_python_bundling()
+                bundling=BundlingOptionsFactory.get_optimized_shared_bundling()
             ),
             role=self.lambda_execution_role,
             memory_size=256,
@@ -521,7 +522,7 @@ class PerformanceOptimizationStack(Stack):
             log_retention=logs.RetentionDays.ONE_MONTH
         )
 
-        # Canonical Transform Functions using CDK bundling
+        # Canonical Transform Functions using simple asset packaging
         canonical_tables = ['companies', 'contacts', 'tickets', 'time_entries']
         for table in canonical_tables:
             functions[f'canonical_transform_{table}'] = _lambda.Function(
@@ -530,10 +531,7 @@ class PerformanceOptimizationStack(Stack):
                 function_name=f"avesa-canonical-transform-{table.replace('_', '-')}-{self.env_name}",
                 runtime=_lambda.Runtime.PYTHON_3_9,
                 handler="lambda_function.lambda_handler",
-                code=_lambda.Code.from_asset(
-                    "../src/canonical_transform",
-                    bundling=BundlingOptionsFactory.get_python_bundling()
-                ),
+                code=_lambda.Code.from_asset("../src/canonical_transform"),
                 role=self.lambda_execution_role,
                 memory_size=1024,
                 timeout=Duration.seconds(900),
@@ -541,7 +539,7 @@ class PerformanceOptimizationStack(Stack):
                 log_retention=logs.RetentionDays.ONE_MONTH
             )
 
-        # ClickHouse Loader Functions using CDK bundling
+        # ClickHouse Loader Functions using simple asset packaging
         for table in canonical_tables:
             functions[f'clickhouse_loader_{table}'] = _lambda.Function(
                 self,
@@ -549,10 +547,7 @@ class PerformanceOptimizationStack(Stack):
                 function_name=f"clickhouse-loader-{table.replace('_', '-')}-{self.env_name}",
                 runtime=_lambda.Runtime.PYTHON_3_9,
                 handler="lambda_function.lambda_handler",
-                code=_lambda.Code.from_asset(
-                    "../src/clickhouse/data_loader",
-                    bundling=BundlingOptionsFactory.get_python_bundling()
-                ),
+                code=_lambda.Code.from_asset("../src/clickhouse/data_loader"),
                 role=self.lambda_execution_role,
                 memory_size=1024,
                 timeout=Duration.seconds(900),
@@ -592,7 +587,20 @@ class PerformanceOptimizationStack(Stack):
         # Determine processing mode
         determine_mode = sfn.Choice(self, "DetermineProcessingMode")
         
-        # Multi-tenant processing
+        # Multi-tenant processing with iterator
+        tenant_processing_task = sfn_tasks.LambdaInvoke(
+            self,
+            "ProcessTenant",
+            lambda_function=placeholder_lambda,  # Will be updated with actual function
+            payload=sfn.TaskInput.from_object({
+                "tenant_config.$": "$$.Map.Item.Value",
+                "job_id.$": "$.job_id",
+                "table_name.$": "$.table_name",
+                "force_full_sync.$": "$.force_full_sync",
+                "execution_id.$": "$$.Execution.Name"
+            })
+        )
+        
         multi_tenant_processing = sfn.Map(
             self,
             "MultiTenantProcessing",
@@ -605,15 +613,14 @@ class PerformanceOptimizationStack(Stack):
                 "force_full_sync.$": "$.force_full_sync",
                 "execution_id.$": "$$.Execution.Name"
             }
-        )
+        ).iterator(tenant_processing_task)
 
-        # Single tenant processing
-        single_tenant_processing = sfn_tasks.StepFunctionsStartExecution(
+        # Single tenant processing - use Lambda invoke instead of Step Functions for now
+        single_tenant_processing = sfn_tasks.LambdaInvoke(
             self,
             "SingleTenantProcessing",
-            state_machine=placeholder_lambda,  # Will be updated with actual state machine
-            integration_pattern=sfn.IntegrationPattern.RUN_JOB,
-            input=sfn.TaskInput.from_object({
+            lambda_function=placeholder_lambda,  # Will be updated with actual function
+            payload=sfn.TaskInput.from_object({
                 "tenant_config.$": "$.tenants[0]",
                 "job_id.$": "$.job_id",
                 "table_name.$": "$.table_name",
@@ -656,7 +663,7 @@ class PerformanceOptimizationStack(Stack):
             error="InvalidProcessingMode"
         )
 
-        # Build the state machine definition
+        # Build the state machine definition with separate aggregation paths
         definition = initialize_pipeline.next(
             determine_mode
             .when(
@@ -665,7 +672,7 @@ class PerformanceOptimizationStack(Stack):
             )
             .when(
                 sfn.Condition.string_equals("$.mode", "single-tenant"),
-                single_tenant_processing.next(aggregate_results).next(notify_completion)
+                single_tenant_processing.next(notify_completion)
             )
             .otherwise(handle_invalid_mode)
         )
@@ -704,6 +711,20 @@ class PerformanceOptimizationStack(Stack):
 
         validate_discovery = sfn.Choice(self, "ValidateTableDiscovery")
         
+        # Table processing task for iterator
+        table_processing_task = sfn_tasks.LambdaInvoke(
+            self,
+            "ProcessTable",
+            lambda_function=placeholder_lambda,  # Will be updated with actual function
+            payload=sfn.TaskInput.from_object({
+                "table_config.$": "$$.Map.Item.Value",
+                "tenant_config.$": "$.tenant_config",
+                "job_id.$": "$.job_id",
+                "force_full_sync.$": "$.force_full_sync",
+                "execution_id.$": "$.execution_id"
+            })
+        )
+        
         parallel_table_processing = sfn.Map(
             self,
             "ParallelTableProcessing",
@@ -716,7 +737,7 @@ class PerformanceOptimizationStack(Stack):
                 "force_full_sync.$": "$.force_full_sync",
                 "execution_id.$": "$.execution_id"
             }
-        )
+        ).iterator(table_processing_task)
 
         evaluate_results = sfn_tasks.LambdaInvoke(
             self,
@@ -784,6 +805,20 @@ class PerformanceOptimizationStack(Stack):
 
         validate_chunks = sfn.Choice(self, "ValidateChunkPlan")
         
+        # Chunk processing task for iterator
+        chunk_processing_task = sfn_tasks.LambdaInvoke(
+            self,
+            "ProcessChunk",
+            lambda_function=placeholder_lambda,  # Will be updated with actual function
+            payload=sfn.TaskInput.from_object({
+                "chunk_config.$": "$$.Map.Item.Value",
+                "table_config.$": "$.table_config",
+                "tenant_config.$": "$.tenant_config",
+                "job_id.$": "$.job_id",
+                "table_state.$": "$.table_processing_result.table_state"
+            })
+        )
+        
         process_chunks = sfn.Map(
             self,
             "ProcessChunks",
@@ -796,7 +831,7 @@ class PerformanceOptimizationStack(Stack):
                 "job_id.$": "$.job_id",
                 "table_state.$": "$.table_processing_result.table_state"
             }
-        )
+        ).iterator(chunk_processing_task)
 
         evaluate_chunk_results = sfn_tasks.LambdaInvoke(
             self,

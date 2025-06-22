@@ -2,10 +2,10 @@
 Canonical Transform Lambda Function
 
 This function transforms raw data from various integration services into canonical format
-with SCD Type 2 historical tracking. Each canonical table has its own dedicated lambda function.
+with configurable SCD processing. Respects SCD type configuration from mapping files.
 
 Features:
-- SCD Type 2 historical tracking
+- Configurable SCD Type 1 or Type 2 processing based on table configuration
 - Data validation and quality checks
 - Schema evolution handling
 - Multi-tenant support
@@ -47,13 +47,15 @@ except ImportError as e:
 
 # Initialize clients using shared factory
 from shared import AWSClientFactory, CanonicalMapper
+from shared.scd_config import SCDConfigManager, get_scd_type, is_scd_type_1, is_scd_type_2
 aws_factory = AWSClientFactory()
 clients = aws_factory.get_client_bundle(['dynamodb', 's3'])
 dynamodb = clients['dynamodb']
 s3 = clients['s3']
 
-# Initialize canonical mapper
+# Initialize canonical mapper and SCD config manager
 canonical_mapper = CanonicalMapper(s3_client=s3)
+scd_config_manager = SCDConfigManager(s3_client=s3)
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -228,8 +230,15 @@ def process_tenant_canonical_data(
                 'message': 'No records to transform'
             }
         
-        # Apply SCD Type 2 logic
-        scd_records = apply_scd_type2_logic(config, tenant_id, canonical_table, transformed_records, logger)
+        # Apply SCD logic based on table configuration
+        bucket_name = config.bucket_name if hasattr(config, 'bucket_name') else os.environ.get('BUCKET_NAME')
+        scd_type = get_scd_type(canonical_table, bucket_name)
+        logger.info(f"Table {canonical_table} uses SCD {scd_type} processing")
+        
+        if scd_type == 'type_1':
+            scd_records = apply_scd_type1_logic(config, tenant_id, canonical_table, transformed_records, logger)
+        else:
+            scd_records = apply_scd_type2_logic(config, tenant_id, canonical_table, transformed_records, logger)
         
         # Write canonical data to S3
         timestamp = get_timestamp()
@@ -425,6 +434,99 @@ def load_canonical_mapping(canonical_table: str) -> Dict[str, Any]:
 def transform_record(raw_record: Dict[str, Any], mapping: Dict[str, Any], canonical_table: str) -> Optional[Dict[str, Any]]:
     """Transform a single record to canonical format using shared CanonicalMapper."""
     return canonical_mapper.transform_record(raw_record, mapping, canonical_table)
+
+
+def calculate_record_hash(record: Dict[str, Any]) -> str:
+    """Calculate hash for data quality and change detection."""
+    import hashlib
+    import json
+    
+    # Exclude SCD fields from hash calculation
+    scd_fields = {
+        'effective_start_date', 'effective_end_date', 'is_current',
+        'record_hash', 'ingestion_timestamp', 'temp_record_hash'
+    }
+    
+    # Create a copy without SCD fields
+    hash_data = {k: v for k, v in record.items() if k not in scd_fields}
+    
+    # Sort keys for consistent hashing
+    sorted_data = json.dumps(hash_data, sort_keys=True, default=str)
+    return hashlib.md5(sorted_data.encode()).hexdigest()
+
+
+def apply_scd_type1_logic(config: Config, tenant_id: str, canonical_table: str, new_records: List[Dict[str, Any]], logger: PipelineLogger) -> List[Dict[str, Any]]:
+    """Apply SCD Type 1 logic - simple current data only with deduplication."""
+    try:
+        import pandas as pd
+        from datetime import datetime, timezone
+        
+        logger.info(f"Applying SCD Type 1 logic to {len(new_records)} records")
+        
+        if not new_records:
+            return []
+        
+        # Convert to DataFrame for easier processing
+        df = pd.DataFrame(new_records)
+        
+        # Get the correct ID field for this table
+        id_field_mapping = {
+            'companies': 'company_id',
+            'contacts': 'contact_id',
+            'tickets': 'ticket_id',
+            'time_entries': 'entry_id'
+        }
+        id_field = id_field_mapping.get(canonical_table)
+        
+        if not id_field or id_field not in df.columns:
+            # Fallback to 'id' if specific field not found
+            if 'id' in df.columns:
+                id_field = 'id'
+                logger.warning(f"Using fallback ID field 'id' for table {canonical_table}")
+            else:
+                logger.error(f"No valid ID field found for table {canonical_table}")
+                return new_records
+        
+        # Ensure updated_date is datetime
+        if 'updated_date' in df.columns:
+            df['updated_date'] = pd.to_datetime(df['updated_date'])
+        else:
+            # Use current timestamp if no updated_date
+            df['updated_date'] = pd.Timestamp.now(tz='UTC')
+            logger.warning(f"No updated_date field found, using current timestamp")
+        
+        # For SCD Type 1, keep only the latest record per ID
+        logger.info(f"Deduplicating records by {id_field} for SCD Type 1")
+        
+        # Sort by ID and updated_date, then keep the last (most recent) record per ID
+        df_sorted = df.sort_values([id_field, 'updated_date'])
+        df_deduplicated = df_sorted.groupby(id_field).tail(1).reset_index(drop=True)
+        
+        logger.info(f"Deduplicated from {len(df)} to {len(df_deduplicated)} records for SCD Type 1")
+        
+        # Apply SCD Type 1 fields to the deduplicated records
+        scd_records = []
+        for _, row in df_deduplicated.iterrows():
+            record = row.to_dict()
+            
+            # For SCD Type 1, all records are current with no versioning
+            record['effective_start_date'] = record['updated_date']
+            record['effective_end_date'] = None
+            record['is_current'] = True  # All records are current in Type 1
+            record['record_hash'] = calculate_record_hash(record)
+            
+            scd_records.append(record)
+        
+        logger.info(f"SCD Type 1 processing complete: {len(scd_records)} current records")
+        
+        return scd_records
+        
+    except Exception as e:
+        logger.error(f"Failed to apply SCD Type 1 logic: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        # Return original records on error to avoid data loss
+        return new_records
 
 
 def apply_scd_type2_logic(config: Config, tenant_id: str, canonical_table: str, new_records: List[Dict[str, Any]], logger: PipelineLogger) -> List[Dict[str, Any]]:

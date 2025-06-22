@@ -12,7 +12,7 @@ class BundlingOptionsFactory:
     @staticmethod
     def get_python_bundling(requirements_file: str = "requirements.txt") -> BundlingOptions:
         """
-        Standard Python Lambda bundling options.
+        Standard Python Lambda bundling options with fallback handling.
         
         Args:
             requirements_file: Name of requirements file to install
@@ -24,7 +24,11 @@ class BundlingOptionsFactory:
             image=_lambda.Runtime.PYTHON_3_9.bundling_image,
             command=[
                 "bash", "-c",
-                f"pip install -r {requirements_file} -t /asset-output && "
+                f"if [ -f {requirements_file} ]; then "
+                f"pip install -r {requirements_file} -t /asset-output; "
+                "else "
+                "echo 'No requirements.txt found, skipping pip install'; "
+                "fi && "
                 "cp -au . /asset-output && "
                 "find /asset-output -name '*.pyc' -delete && "
                 "find /asset-output -name '__pycache__' -type d -exec rm -rf {{}} + || true"
@@ -61,7 +65,11 @@ class BundlingOptionsFactory:
             image=_lambda.Runtime.PYTHON_3_9.bundling_image,
             command=[
                 "bash", "-c",
-                f"pip install -r {requirements_file} -t /asset-output && "
+                f"if [ -f {requirements_file} ]; then "
+                f"pip install -r {requirements_file} -t /asset-output; "
+                "else "
+                "echo 'No requirements.txt found, skipping pip install'; "
+                "fi && "
                 "cp -au . /asset-output && "
                 f"{exclude_cmd}"
             ]
@@ -82,7 +90,11 @@ class BundlingOptionsFactory:
             image=_lambda.Runtime.PYTHON_3_9.bundling_image,
             command=[
                 "bash", "-c",
-                f"pip install -r {requirements_file} -t /asset-output --no-deps && "
+                f"if [ -f {requirements_file} ]; then "
+                f"pip install -r {requirements_file} -t /asset-output --no-deps; "
+                "else "
+                "echo 'No requirements.txt found, skipping pip install'; "
+                "fi && "
                 "cp -au *.py /asset-output/ && "
                 "find /asset-output -name '*.pyc' -delete && "
                 "find /asset-output -name '__pycache__' -type d -exec rm -rf {{}} + || true && "
@@ -105,5 +117,47 @@ class BundlingOptionsFactory:
                 "pip install -r requirements.txt -t /asset-output/python && "
                 "find /asset-output -name '*.pyc' -delete && "
                 "find /asset-output -name '__pycache__' -type d -exec rm -rf {{}} + || true"
+            ]
+        )
+    
+    @staticmethod
+    def get_optimized_shared_bundling(requirements_file: str = "requirements.txt") -> BundlingOptions:
+        """
+        Optimized bundling that includes the root shared directory for optimized lambda functions.
+        This eliminates the need for duplicated shared files in each lambda directory.
+        
+        Args:
+            requirements_file: Name of requirements file to install
+            
+        Returns:
+            BundlingOptions configured to include shared modules from root
+        """
+        return BundlingOptions(
+            image=_lambda.Runtime.PYTHON_3_9.bundling_image,
+            command=[
+                "bash", "-c",
+                # Install requirements if they exist
+                f"if [ -f {requirements_file} ]; then "
+                f"pip install -r {requirements_file} -t /asset-output; "
+                "else "
+                "echo 'No requirements.txt found, skipping pip install'; "
+                "fi && "
+                # Copy the lambda function code
+                "cp -au . /asset-output && "
+                # Copy the shared directory from the root src directory
+                "if [ -d ../../shared ]; then "
+                "cp -au ../../shared /asset-output/; "
+                "echo 'Copied shared directory from ../../shared'; "
+                "else "
+                "echo 'Warning: shared directory not found at ../../shared'; "
+                "fi && "
+                # Remove any existing duplicated shared directories
+                "rm -rf /asset-output/shared/shared 2>/dev/null || true && "
+                # Clean up unnecessary files
+                "find /asset-output -name '*.pyc' -delete && "
+                "find /asset-output -name '__pycache__' -type d -exec rm -rf {{}} + || true && "
+                "find /asset-output -name '*.md' -delete || true && "
+                "find /asset-output -name '.git*' -exec rm -rf {{}} + || true && "
+                "find /asset-output -name 'tests' -type d -exec rm -rf {{}} + || true"
             ]
         )

@@ -10,50 +10,11 @@ import boto3
 from datetime import datetime, timezone
 from typing import Dict, Any
 
-# Fallback implementations for when shared modules aren't available
-try:
-    import sys
-    import os
-    sys.path.append('/opt/python')
-    sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
-    from config_simple import Config
-    from logger import PipelineLogger
-    from aws_clients import get_dynamodb_client, get_cloudwatch_client
-    from utils import get_timestamp
-except ImportError:
-    import os
-    
-    class Config:
-        def __init__(self, **kwargs):
-            self.environment = kwargs.get('environment', 'dev')
-        
-        @classmethod
-        def from_environment(cls):
-            return cls(
-                environment=os.environ.get("ENVIRONMENT", "dev")
-            )
-    
-    class PipelineLogger:
-        def __init__(self, name):
-            self.name = name
-        
-        def info(self, message, **kwargs):
-            print(f"INFO [{self.name}]: {message} {kwargs}")
-        
-        def error(self, message, **kwargs):
-            print(f"ERROR [{self.name}]: {message} {kwargs}")
-        
-        def warning(self, message, **kwargs):
-            print(f"WARNING [{self.name}]: {message} {kwargs}")
-    
-    def get_dynamodb_client():
-        return boto3.client('dynamodb')
-    
-    def get_cloudwatch_client():
-        return boto3.client('cloudwatch')
-    
-    def get_timestamp():
-        return datetime.now(timezone.utc).isoformat()
+# Import shared modules from root shared directory
+from shared.config_simple import Config
+from shared.logger import PipelineLogger
+from shared.aws_clients import get_dynamodb_client, get_cloudwatch_client
+from shared.utils import get_timestamp
 
 
 class CompletionNotifier:

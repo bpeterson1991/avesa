@@ -3,6 +3,7 @@ ClickHouse SCD Type 2 Processor Lambda Function
 
 This function handles SCD Type 2 processing for ClickHouse tables,
 managing historical data versioning and ensuring data integrity.
+Only processes tables configured with SCD Type 2.
 """
 
 import json
@@ -13,6 +14,7 @@ from typing import Dict, Any, List
 
 # Import shared components
 from shared import ClickHouseClient
+from shared.scd_config import SCDConfigManager, get_scd_type, is_scd_type_2, filter_tables_by_scd_type
 
 # Configure logging
 logger = logging.getLogger()
@@ -303,12 +305,25 @@ def process_table_scd(client, table_name: str) -> Dict[str, Any]:
     """Process SCD Type 2 operations for a specific table."""
     logger.info(f"Processing SCD operations for {table_name}")
     
+    # Check if this table uses SCD Type 2
+    bucket_name = os.environ.get('S3_BUCKET_NAME')
+    scd_type = get_scd_type(table_name, bucket_name)
+    
     results = {
         'table': table_name,
+        'scd_type': scd_type,
         'operations': {}
     }
     
+    if scd_type != 'type_2':
+        logger.info(f"Table {table_name} uses SCD {scd_type}, skipping SCD Type 2 processing")
+        results['status'] = 'skipped'
+        results['reason'] = f'Table uses SCD {scd_type}, not type_2'
+        return results
+    
     try:
+        logger.info(f"Table {table_name} uses SCD Type 2, proceeding with processing")
+        
         # 1. Validate SCD integrity
         validation_result = validate_scd_integrity(client, table_name)
         results['operations']['validation'] = validation_result
@@ -331,7 +346,7 @@ def process_table_scd(client, table_name: str) -> Dict[str, Any]:
         results['operations']['statistics'] = stats_result
         
         results['status'] = 'success'
-        logger.info(f"Completed SCD processing for {table_name}")
+        logger.info(f"Completed SCD Type 2 processing for {table_name}")
         
     except Exception as e:
         logger.error(f"Failed SCD processing for {table_name}: {e}")
@@ -368,8 +383,11 @@ def lambda_handler(event, context):
         if 'table_name' in event:
             tables = [event['table_name']]
         else:
-            # Process all main tables
-            tables = ['companies', 'contacts', 'tickets', 'time_entries']
+            # Get all main tables and filter by SCD Type 2
+            all_tables = ['companies', 'contacts', 'tickets', 'time_entries']
+            bucket_name = os.environ.get('S3_BUCKET_NAME')
+            tables = filter_tables_by_scd_type(all_tables, 'type_2', bucket_name)
+            logger.info(f"Filtered to {len(tables)} SCD Type 2 tables: {tables}")
         
         # Process each table
         results = []
@@ -380,6 +398,7 @@ def lambda_handler(event, context):
         # Summarize results
         successful_tables = [r for r in results if r.get('status') == 'success']
         failed_tables = [r for r in results if r.get('status') == 'error']
+        skipped_tables = [r for r in results if r.get('status') == 'skipped']
         
         response = {
             'statusCode': 200 if not failed_tables else 207,
@@ -388,7 +407,8 @@ def lambda_handler(event, context):
                 'summary': {
                     'tables_processed': len(results),
                     'successful_tables': len(successful_tables),
-                    'failed_tables': len(failed_tables)
+                    'failed_tables': len(failed_tables),
+                    'skipped_tables': len(skipped_tables)
                 },
                 'results': results,
                 'environment': os.environ.get('ENVIRONMENT', 'unknown')

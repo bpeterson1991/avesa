@@ -44,6 +44,18 @@ from .validators import (
 # Canonical mapping and transformation
 from .canonical_mapper import CanonicalMapper
 
+# SCD configuration management
+from .scd_config import (
+    SCDConfigManager,
+    SCDType,
+    SCDTypeEnum,
+    get_scd_type,
+    is_scd_type_1,
+    is_scd_type_2,
+    filter_tables_by_scd_type,
+    validate_scd_configuration
+)
+
 # Configuration and environment management
 from .config_simple import Config, TenantConfig, ServiceConfig, ConnectWiseCredentials
 from .environment import Environment, EnvironmentConfig, get_current_environment, get_table_name
@@ -87,6 +99,16 @@ __all__ = [
     
     # Canonical mapping
     "CanonicalMapper",
+    
+    # SCD configuration
+    "SCDConfigManager",
+    "SCDType",
+    "SCDTypeEnum",
+    "get_scd_type",
+    "is_scd_type_1",
+    "is_scd_type_2",
+    "filter_tables_by_scd_type",
+    "validate_scd_configuration",
     
     # Configuration
     "Config",
