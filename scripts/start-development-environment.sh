@@ -172,6 +172,7 @@ start_real_mode() {
     # Set environment variables for real ClickHouse connection
     export AWS_SDK_LOAD_CONFIG=1
     export NODE_ENV=development
+    export CLICKHOUSE_MODE=real
     export PORT=3001
     export CLICKHOUSE_SECRET_NAME=arn:aws:secretsmanager:us-east-2:123938354448:secret:clickhouse-connection-dev-V9zSgO
     export AWS_REGION=us-east-2
@@ -211,7 +212,7 @@ start_mock_mode() {
 start_mock_api() {
     print_status "Starting Mock API server on port 3001..."
     cd src/clickhouse/api
-    NODE_ENV=development JWT_SECRET=avesa-demo-secret-key-2024 PORT=3001 node mock-server.js > api.log 2>&1 &
+    NODE_ENV=development CLICKHOUSE_MODE=mock JWT_SECRET=avesa-demo-secret-key-2024 PORT=3001 node mock-server.js > api.log 2>&1 &
     API_PID=$!
     cd ../../..
     
@@ -240,6 +241,7 @@ start_api_only_mode() {
     
     export AWS_SDK_LOAD_CONFIG=1
     export NODE_ENV=development
+    export CLICKHOUSE_MODE=real
     export PORT=3001
     export CLICKHOUSE_SECRET_NAME=clickhouse-connection-dev
     export AWS_REGION=us-east-2

@@ -33,6 +33,7 @@ sys.path.append(str(Path(__file__).parent.parent / 'src'))
 try:
     from shared.credential_manager import get_credential_manager
     from shared.logger import get_logger
+    from shared.scd_config import SCDConfigManager
     SHARED_IMPORTS_AVAILABLE = True
 except ImportError:
     SHARED_IMPORTS_AVAILABLE = False
@@ -65,8 +66,12 @@ class PipelineValidator:
                 self.credential_manager = get_credential_manager(self.region)
                 self.env_config = self.credential_manager.get_environment_config()
                 self.bucket_name = self.env_config['bucket_name']
+                self.scd_manager = SCDConfigManager()
             except Exception as e:
                 print(f"⚠️ Could not initialize credential manager: {e}")
+                self.scd_manager = None
+        else:
+            self.scd_manager = None
     
     def print_header(self, title):
         """Print formatted section header"""
@@ -114,37 +119,94 @@ class PipelineValidator:
             
             for table in tables:
                 try:
+                    # Get SCD type for this table
+                    scd_type = 'type_1'  # Default
+                    if self.scd_manager:
+                        try:
+                            scd_type = self.scd_manager.get_scd_type(table, self.bucket_name)
+                        except Exception:
+                            pass  # Use default
+                    
                     # Total count
                     total_query = f"SELECT COUNT(*) FROM {table} WHERE tenant_id = '{self.tenant_id}'"
                     total_result = client.query(total_query)
                     total_count = total_result.result_rows[0][0] if total_result.result_rows else 0
                     
-                    # Current count
-                    current_query = f"SELECT COUNT(*) FROM {table} WHERE tenant_id = '{self.tenant_id}' AND is_current = true"
-                    current_result = client.query(current_query)
-                    current_count = current_result.result_rows[0][0] if current_result.result_rows else 0
-                    
-                    # Check for duplicates
-                    dup_query = f"""
-                    SELECT COUNT(*) FROM (
-                        SELECT tenant_id, id, COUNT(*) as cnt 
-                        FROM {table} 
-                        WHERE tenant_id = '{self.tenant_id}' AND is_current = true 
-                        GROUP BY tenant_id, id 
-                        HAVING cnt > 1
-                    )
-                    """
-                    dup_result = client.query(dup_query)
-                    duplicate_count = dup_result.result_rows[0][0] if dup_result.result_rows else 0
-                    
-                    table_stats[table] = {
-                        'total': total_count,
-                        'current': current_count,
-                        'duplicates': duplicate_count
-                    }
-                    
-                    status = "✅" if duplicate_count == 0 else "⚠️"
-                    self.print_result(f"{table}: {total_count} total, {current_count} current, {duplicate_count} duplicates", duplicate_count == 0)
+                    # SCD-aware validation
+                    if scd_type == 'type_2':
+                        # Type 2: Check current records and historical tracking
+                        current_query = f"SELECT COUNT(*) FROM {table} WHERE tenant_id = '{self.tenant_id}' AND is_current = true"
+                        current_result = client.query(current_query)
+                        current_count = current_result.result_rows[0][0] if current_result.result_rows else 0
+                        
+                        # Check for duplicates in current records only
+                        dup_query = f"""
+                        SELECT COUNT(*) FROM (
+                            SELECT tenant_id, id, COUNT(*) as cnt
+                            FROM {table}
+                            WHERE tenant_id = '{self.tenant_id}' AND is_current = true
+                            GROUP BY tenant_id, id
+                            HAVING cnt > 1
+                        )
+                        """
+                        dup_result = client.query(dup_query)
+                        duplicate_count = dup_result.result_rows[0][0] if dup_result.result_rows else 0
+                        
+                        # Check SCD structure
+                        scd_fields_query = f"""
+                        SELECT COUNT(*) FROM {table}
+                        WHERE tenant_id = '{self.tenant_id}'
+                        AND effective_start_date IS NOT NULL
+                        AND effective_end_date IS NOT NULL
+                        """
+                        scd_result = client.query(scd_fields_query)
+                        scd_valid_count = scd_result.result_rows[0][0] if scd_result.result_rows else 0
+                        
+                        table_stats[table] = {
+                            'scd_type': scd_type,
+                            'total': total_count,
+                            'current': current_count,
+                            'duplicates': duplicate_count,
+                            'scd_valid': scd_valid_count
+                        }
+                        
+                        scd_valid = scd_valid_count == total_count
+                        status = "✅" if duplicate_count == 0 and scd_valid else "⚠️"
+                        self.print_result(f"{table} (SCD Type 2): {total_count} total, {current_count} current, {duplicate_count} duplicates, SCD fields: {'valid' if scd_valid else 'invalid'}", duplicate_count == 0 and scd_valid)
+                        
+                    else:
+                        # Type 1: Simple validation - no historical records expected
+                        # For Type 1, all records should be current (or no is_current field)
+                        try:
+                            current_query = f"SELECT COUNT(*) FROM {table} WHERE tenant_id = '{self.tenant_id}' AND is_current = true"
+                            current_result = client.query(current_query)
+                            current_count = current_result.result_rows[0][0] if current_result.result_rows else 0
+                        except:
+                            # If is_current field doesn't exist, that's expected for Type 1
+                            current_count = total_count
+                        
+                        # Check for duplicates (should be none for Type 1)
+                        dup_query = f"""
+                        SELECT COUNT(*) FROM (
+                            SELECT tenant_id, id, COUNT(*) as cnt
+                            FROM {table}
+                            WHERE tenant_id = '{self.tenant_id}'
+                            GROUP BY tenant_id, id
+                            HAVING cnt > 1
+                        )
+                        """
+                        dup_result = client.query(dup_query)
+                        duplicate_count = dup_result.result_rows[0][0] if dup_result.result_rows else 0
+                        
+                        table_stats[table] = {
+                            'scd_type': scd_type,
+                            'total': total_count,
+                            'current': current_count,
+                            'duplicates': duplicate_count
+                        }
+                        
+                        status = "✅" if duplicate_count == 0 else "⚠️"
+                        self.print_result(f"{table} (SCD Type 1): {total_count} records, {duplicate_count} duplicates", duplicate_count == 0)
                     
                 except Exception as e:
                     table_stats[table] = {'error': str(e)}
@@ -296,9 +358,13 @@ class PipelineValidator:
             
             # Verify SCD structure if in full or data mode
             scd_verification = {}
-            if self.mode in ['full', 'data'] and 'companies' in file_structure:
-                latest_companies_file = max(file_structure['companies'], key=lambda x: x['LastModified'])
-                scd_verification = self.verify_scd_structure(s3_client, latest_companies_file['Key'])
+            if self.mode in ['full', 'data']:
+                # Test SCD structure for each table type
+                for table, files in file_structure.items():
+                    if files:
+                        latest_file = max(files, key=lambda x: x['LastModified'])
+                        table_scd_verification = self.verify_scd_structure(s3_client, latest_file['Key'])
+                        scd_verification[table] = table_scd_verification
             
             self.results['data_pipeline'] = {
                 'status': 'SUCCESS',
@@ -318,28 +384,83 @@ class PipelineValidator:
             return False
     
     def verify_scd_structure(self, s3_client, file_key):
-        """Verify SCD Type 2 structure in a canonical file"""
+        """Verify SCD structure in a canonical file based on table type"""
         try:
             response = s3_client.get_object(Bucket=self.bucket_name, Key=file_key)
             df = pd.read_parquet(BytesIO(response['Body'].read()))
             
-            # Check required SCD fields
-            required_fields = ['effective_start_date', 'effective_end_date', 'is_current', 'record_hash']
-            present_fields = [field for field in required_fields if field in df.columns]
+            # Extract table name from file key
+            key_parts = file_key.split('/')
+            table_name = key_parts[3] if len(key_parts) >= 4 else 'unknown'
             
-            # Check is_current logic
-            current_records = df[df['is_current'] == True] if 'is_current' in df.columns else pd.DataFrame()
+            # Get SCD type for this table
+            scd_type = 'type_1'  # Default
+            if self.scd_manager:
+                try:
+                    scd_type = self.scd_manager.get_scd_type(table_name, self.bucket_name)
+                except Exception:
+                    pass  # Use default
             
-            self.print_result(f"SCD fields present: {present_fields}")
-            self.print_result(f"Total records: {len(df)}")
-            self.print_result(f"Current records: {len(current_records)}")
+            self.print_result(f"Verifying {table_name} (SCD {scd_type})")
             
-            return {
-                'total_records': len(df),
-                'scd_fields_present': present_fields,
-                'current_records': len(current_records),
-                'columns': list(df.columns)
-            }
+            if scd_type == 'type_2':
+                # Check required SCD Type 2 fields (using actual schema field names)
+                required_fields = ['effective_date', 'expiration_date', 'is_current', 'data_hash']
+                present_fields = [field for field in required_fields if field in df.columns]
+                
+                # Check is_current logic
+                current_records = df[df['is_current'] == True] if 'is_current' in df.columns else pd.DataFrame()
+                
+                # Validate SCD Type 2 structure - allow for some flexibility in field names
+                core_scd_fields = ['effective_date', 'is_current']
+                core_present = [field for field in core_scd_fields if field in df.columns]
+                scd_valid = len(core_present) == len(core_scd_fields)
+                
+                self.print_result(f"SCD Type 2 fields present: {present_fields}")
+                self.print_result(f"Total records: {len(df)}")
+                self.print_result(f"Current records: {len(current_records)}")
+                self.print_result(f"SCD structure valid: {scd_valid}", scd_valid)
+                
+                return {
+                    'table_name': table_name,
+                    'scd_type': scd_type,
+                    'total_records': len(df),
+                    'scd_fields_present': present_fields,
+                    'scd_fields_required': required_fields,
+                    'current_records': len(current_records),
+                    'scd_structure_valid': scd_valid,
+                    'columns': list(df.columns)
+                }
+            else:
+                # Type 1: Check for SCD fields but allow them for compatibility
+                # The schema uses universal SCD fields, but Type 1 tables should have all records as current
+                scd_fields = ['effective_date', 'expiration_date', 'is_current', 'data_hash']
+                present_scd_fields = [field for field in scd_fields if field in df.columns]
+                
+                # For Type 1 with universal SCD schema: all records should be current
+                current_records = df[df['is_current'] == True] if 'is_current' in df.columns else df
+                all_current = len(current_records) == len(df) if 'is_current' in df.columns else True
+                
+                # Type 1 is valid if either no SCD fields OR all records are current
+                type1_valid = len(present_scd_fields) == 0 or all_current
+                
+                self.print_result(f"Total records: {len(df)}")
+                if present_scd_fields:
+                    self.print_result(f"SCD fields present: {present_scd_fields}")
+                    self.print_result(f"Current records: {len(current_records)}/{len(df)}")
+                    self.print_result(f"All records current: {all_current}")
+                self.print_result(f"Type 1 structure valid: {type1_valid}", type1_valid)
+                
+                return {
+                    'table_name': table_name,
+                    'scd_type': scd_type,
+                    'total_records': len(df),
+                    'scd_fields_present': present_scd_fields,
+                    'current_records': len(current_records),
+                    'all_records_current': all_current,
+                    'type1_structure_valid': type1_valid,
+                    'columns': list(df.columns)
+                }
             
         except Exception as e:
             self.print_result(f"Error verifying SCD structure: {str(e)}", False)

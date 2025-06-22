@@ -37,13 +37,13 @@ python tests/test-validation-suite.py --mode deployment
 python tests/test-validation-suite.py --mode utils
 ```
 
-### 2. **`validate-pipeline.py`** - Pipeline Validation Suite ⭐
-Comprehensive pipeline validation with multiple validation modes (existing consolidated script)
+### 2. **`validate-pipeline.py`** - Enhanced Pipeline Validation Suite ⭐
+Comprehensive pipeline validation with SCD-aware validation logic (ENHANCED with SCD support)
 
 **Modes:**
 - `full` - Complete pipeline validation (default)
 - `quick` - Quick health checks
-- `data` - Data integrity focus
+- `data` - Data integrity focus with SCD-aware validation
 - `performance` - Performance metrics
 
 **Usage:**
@@ -54,16 +54,40 @@ python tests/validate-pipeline.py --mode full
 # Quick health checks (fast connectivity tests)
 python tests/validate-pipeline.py --mode quick
 
-# Data integrity focus (SCD validation, multi-tenant isolation)
+# Data integrity focus (SCD-aware validation, multi-tenant isolation)
 python tests/validate-pipeline.py --mode data
 
 # Performance metrics (query performance, response times)
 python tests/validate-pipeline.py --mode performance
 ```
 
-### 3. **Future Consolidated Suites** (Planned)
+### 3. **`run_scd_tests.py`** - SCD-Aware Test Suite ⭐ **NEW**
+Comprehensive SCD (Slowly Changing Dimension) behavior validation for mixed Type 1 and Type 2 tables
+
+**Modes:**
+- `full` - Complete SCD test suite (default)
+- `behavior` - SCD behavior validation only
+- `config` - SCD configuration tests only
+- `pipeline` - Enhanced pipeline validation
+- `consistency` - Configuration consistency checks
+
+**Usage:**
+```bash
+# Full SCD test suite (recommended)
+python tests/run_scd_tests.py --mode full
+
+# SCD behavior validation only
+python tests/run_scd_tests.py --mode behavior
+
+# SCD configuration tests
+python tests/run_scd_tests.py --mode config
+
+# Configuration consistency validation
+python tests/run_scd_tests.py --mode consistency
+```
+
+### 4. **Future Consolidated Suites** (Planned)
 Additional consolidated test suites will be created as needed:
-- **Pipeline Testing Suite** - End-to-end, targeted, connection, and API testing
 - **Dynamic System Suite** - Orchestrator, processors, service discovery, and integration testing
 
 ## 📊 CONSOLIDATION IMPACT
@@ -85,9 +109,10 @@ Additional consolidated test suites will be created as needed:
 - `validate-pipeline.py` ✅ **KEPT** (already consolidated)
 - `__init__.py` ✅ **KEPT** (required)
 
-### After Consolidation (2 active scripts):
+### After Consolidation (3 active scripts):
 - ✅ **`test-validation-suite.py`** (consolidates 4 scripts)
-- ✅ **`validate-pipeline.py`** (existing consolidated script)
+- ✅ **`validate-pipeline.py`** (enhanced with SCD awareness)
+- ✅ **`run_scd_tests.py`** (NEW - comprehensive SCD validation)
 
 ### Key Improvements:
 - **87% reduction** in script count (15 → 2)
@@ -104,6 +129,7 @@ Additional consolidated test suites will be created as needed:
 # Run all validation tests
 python tests/test-validation-suite.py --mode full
 python tests/validate-pipeline.py --mode full
+python tests/run_scd_tests.py --mode full
 ```
 
 ### Development Testing
@@ -198,10 +224,13 @@ When extending the test suites:
 
 ## 🔗 Related Documentation
 
+- [SCD Test Suite](README_SCD_TESTS.md) - Comprehensive SCD behavior validation
 - [Scripts Directory](../scripts/README.md) - Core operational scripts
 - [Tools Directory](../tools/README.md) - Development and rebuild utilities
 - [Deployment Guide](../docs/DEPLOYMENT_GUIDE.md) - Deployment procedures
 - [Security Implementation Guide](../docs/SECURITY_IMPLEMENTATION_GUIDE.md) - Security best practices
+- [SCD Configuration Guide](../docs/SCD_CONFIGURATION_GUIDE.md) - SCD setup and configuration
+- [SCD Implementation Summary](../docs/SCD_IMPLEMENTATION_SUMMARY.md) - SCD implementation details
 
 ## 📈 Migration Guide
 

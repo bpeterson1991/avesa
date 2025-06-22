@@ -69,11 +69,6 @@ CREATE TABLE IF NOT EXISTS companies (
     bill_to_company_id Nullable(String),
     bill_to_company_name Nullable(String),
     
-    -- SCD Type 2 fields (clean business names)
-    effective_date DateTime DEFAULT now(),
-    expiration_date Nullable(DateTime),
-    is_current Bool DEFAULT true,
-    
     -- Audit fields
     source_system String,
     source_id String,
@@ -86,8 +81,8 @@ CREATE TABLE IF NOT EXISTS companies (
     record_version UInt32 DEFAULT 1
 )
 ENGINE = MergeTree()
-PARTITION BY (tenant_id, toYYYYMM(effective_date))
-ORDER BY (tenant_id, id, effective_date)
+PARTITION BY (tenant_id, toYYYYMM(created_date))
+ORDER BY (tenant_id, id, created_date)
 SETTINGS index_granularity = 8192;
 
 -- Row-level security policy for tenant isolation
@@ -164,11 +159,6 @@ CREATE TABLE IF NOT EXISTS contacts (
     -- Integration fields
     sync_guid Nullable(String),
     
-    -- SCD Type 2 fields
-    effective_date DateTime DEFAULT now(),
-    expiration_date Nullable(DateTime),
-    is_current Bool DEFAULT true,
-    
     -- Audit fields
     source_system String,
     source_id String,
@@ -181,8 +171,8 @@ CREATE TABLE IF NOT EXISTS contacts (
     record_version UInt32 DEFAULT 1
 )
 ENGINE = MergeTree()
-PARTITION BY (tenant_id, toYYYYMM(effective_date))
-ORDER BY (tenant_id, id, effective_date)
+PARTITION BY (tenant_id, toYYYYMM(created_date))
+ORDER BY (tenant_id, id, created_date)
 SETTINGS index_granularity = 8192;
 
 -- =============================================================================
@@ -312,11 +302,6 @@ CREATE TABLE IF NOT EXISTS time_entries (
     date_entered DateTime,
     entered_by Nullable(String),
     
-    -- SCD Type 2 fields
-    effective_date DateTime DEFAULT now(),
-    expiration_date Nullable(DateTime),
-    is_current Bool DEFAULT true,
-    
     -- Audit fields
     source_system String,
     source_id String,
@@ -329,7 +314,7 @@ CREATE TABLE IF NOT EXISTS time_entries (
 )
 ENGINE = MergeTree()
 PARTITION BY (tenant_id, toYYYYMM(date_entered))
-ORDER BY (tenant_id, id, effective_date)
+ORDER BY (tenant_id, id, date_entered)
 SETTINGS index_granularity = 8192;
 
 -- =============================================================================
@@ -368,9 +353,8 @@ AS SELECT
     company_name,
     toDate(created_date) as date,
     count() as total_records,
-    countIf(is_current = true) as current_records
+    count() as current_records
 FROM companies
-WHERE is_current = true
 GROUP BY tenant_id, company_id, company_name, date;
 
 -- Ticket metrics view

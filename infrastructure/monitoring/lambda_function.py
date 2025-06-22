@@ -23,6 +23,28 @@ from typing import Dict, List, Any, Optional, Tuple
 import clickhouse_connect
 from botocore.exceptions import ClientError
 
+# Import SCD configuration utilities
+import sys
+sys.path.append('/opt/python')  # Lambda layer path
+try:
+    from shared.scd_config import SCDConfigManager, is_scd_type_2
+except ImportError:
+    # Fallback for local development
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
+    try:
+        from shared.scd_config import SCDConfigManager, is_scd_type_2
+    except ImportError:
+        # Final fallback - define locally
+        def is_scd_type_2(table_name):
+            """Fallback SCD type detection"""
+            default_scd_types = {
+                'companies': False,    # Type 1
+                'contacts': False,     # Type 1
+                'tickets': True,       # Type 2
+                'time_entries': False  # Type 1
+            }
+            return default_scd_types.get(table_name, False)
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -254,56 +276,95 @@ def analyze_transformation_quality(table_name: str) -> Dict[str, Any]:
 
 
 def analyze_clickhouse_loading_quality(client, table_name: str) -> Dict[str, Any]:
-    """Analyze ClickHouse loading quality for a table"""
+    """Analyze ClickHouse loading quality for a table (handles mixed SCD types)"""
     
     logger.info(f"Analyzing ClickHouse loading quality for table: {table_name}")
     
     try:
-        # Get total record count
-        total_count_query = f"""
-        SELECT COUNT(*) as total_count
-        FROM {table_name}
-        WHERE is_current = 1
-        """
+        # Check if this is an SCD Type 2 table
+        is_type_2 = is_scd_type_2(table_name)
         
-        total_result = client.query(total_count_query)
-        total_count = total_result.result_rows[0][0] if total_result.result_rows else 0
-        
-        # Get duplicate count (SCD Type 2 violations)
-        duplicate_query = f"""
-        SELECT 
-            COUNT(*) as duplicate_count,
-            COUNT(DISTINCT id) as unique_ids_with_duplicates
-        FROM (
-            SELECT id, COUNT(*) as current_count
+        if is_type_2:
+            # Full SCD Type 2 analysis with is_current filtering
+            total_count_query = f"""
+            SELECT COUNT(*) as total_count
             FROM {table_name}
             WHERE is_current = 1
-            GROUP BY id
-            HAVING current_count > 1
-        ) duplicates
-        """
-        
-        duplicate_result = client.query(duplicate_query)
-        if duplicate_result.result_rows:
-            duplicate_count = duplicate_result.result_rows[0][0]
-            scd_violations = duplicate_result.result_rows[0][1]
+            """
+            
+            total_result = client.query(total_count_query)
+            total_count = total_result.result_rows[0][0] if total_result.result_rows else 0
+            
+            # Get duplicate count (SCD Type 2 violations)
+            duplicate_query = f"""
+            SELECT
+                COUNT(*) as duplicate_count,
+                COUNT(DISTINCT id) as unique_ids_with_duplicates
+            FROM (
+                SELECT id, COUNT(*) as current_count
+                FROM {table_name}
+                WHERE is_current = 1
+                GROUP BY id
+                HAVING current_count > 1
+            ) duplicates
+            """
+            
+            duplicate_result = client.query(duplicate_query)
+            if duplicate_result.result_rows:
+                duplicate_count = duplicate_result.result_rows[0][0]
+                scd_violations = duplicate_result.result_rows[0][1]
+            else:
+                duplicate_count = 0
+                scd_violations = 0
+            
+            # Calculate loading quality metrics
+            duplicate_percentage = (duplicate_count / total_count * 100) if total_count > 0 else 0
+            loading_success_rate = 100 - duplicate_percentage
+            health_score = max(0, 100 - duplicate_percentage)
+            
         else:
-            duplicate_count = 0
-            scd_violations = 0
+            # Simplified analysis for SCD Type 1 tables (no is_current field)
+            total_count_query = f"""
+            SELECT COUNT(*) as total_count
+            FROM {table_name}
+            """
+            
+            total_result = client.query(total_count_query)
+            total_count = total_result.result_rows[0][0] if total_result.result_rows else 0
+            
+            # For Type 1 tables, check for actual duplicates by ID
+            duplicate_query = f"""
+            SELECT
+                COUNT(*) as duplicate_count,
+                COUNT(DISTINCT id) as unique_ids_with_duplicates
+            FROM (
+                SELECT id, COUNT(*) as id_count
+                FROM {table_name}
+                GROUP BY id
+                HAVING id_count > 1
+            ) duplicates
+            """
+            
+            duplicate_result = client.query(duplicate_query)
+            if duplicate_result.result_rows:
+                duplicate_count = duplicate_result.result_rows[0][0]
+                scd_violations = 0  # No SCD violations for Type 1 tables
+            else:
+                duplicate_count = 0
+                scd_violations = 0
+            
+            # Calculate loading quality metrics
+            duplicate_percentage = (duplicate_count / total_count * 100) if total_count > 0 else 0
+            loading_success_rate = 100 - duplicate_percentage
+            health_score = max(0, 100 - duplicate_percentage)
         
         # Get loading errors from recent inserts (if tracked)
         loading_errors = 0  # TODO: Implement actual loading error tracking
         
-        # Calculate loading quality metrics
-        duplicate_percentage = (duplicate_count / total_count * 100) if total_count > 0 else 0
-        loading_success_rate = 100 - duplicate_percentage  # Simplified metric
-        
-        # Calculate health score
-        health_score = max(0, 100 - duplicate_percentage)
-        
         return {
             'table_name': table_name,
             'stage': 'loading',
+            'scd_type': 'type_2' if is_type_2 else 'type_1',
             'total_count': total_count,
             'duplicate_count': duplicate_count,
             'scd_violations': scd_violations,
@@ -326,30 +387,73 @@ def analyze_clickhouse_loading_quality(client, table_name: str) -> Dict[str, Any
 
 
 def analyze_final_data_validation(client, table_name: str) -> Dict[str, Any]:
-    """Analyze final data state validation for a table"""
+    """Analyze final data state validation for a table (handles mixed SCD types)"""
     
     logger.info(f"Analyzing final data validation for table: {table_name}")
     
     try:
-        # Get data freshness
-        freshness_query = f"""
-        SELECT 
-            MAX(effective_date) as latest_effective_date,
-            COUNT(*) as total_records,
-            COUNT(DISTINCT tenant_id) as tenant_count
-        FROM {table_name}
-        WHERE is_current = 1
-        """
+        # Check if this is an SCD Type 2 table
+        is_type_2 = is_scd_type_2(table_name)
         
-        freshness_result = client.query(freshness_query)
-        if freshness_result.result_rows:
-            latest_effective_date = freshness_result.result_rows[0][0]
-            total_records = freshness_result.result_rows[0][1]
-            tenant_count = freshness_result.result_rows[0][2]
+        if is_type_2:
+            # Full SCD Type 2 analysis with effective_date and is_current
+            freshness_query = f"""
+            SELECT
+                MAX(effective_date) as latest_effective_date,
+                COUNT(*) as total_records,
+                COUNT(DISTINCT tenant_id) as tenant_count
+            FROM {table_name}
+            WHERE is_current = 1
+            """
+            
+            freshness_result = client.query(freshness_query)
+            if freshness_result.result_rows:
+                latest_effective_date = freshness_result.result_rows[0][0]
+                total_records = freshness_result.result_rows[0][1]
+                tenant_count = freshness_result.result_rows[0][2]
+            else:
+                latest_effective_date = None
+                total_records = 0
+                tenant_count = 0
+            
+            # Get completeness metrics for Type 2 tables
+            completeness_query = f"""
+            SELECT
+                COUNT(*) as total_records,
+                COUNT(CASE WHEN id IS NOT NULL AND id != '' THEN 1 END) as records_with_id,
+                COUNT(CASE WHEN tenant_id IS NOT NULL AND tenant_id != '' THEN 1 END) as records_with_tenant
+            FROM {table_name}
+            WHERE is_current = 1
+            """
+            
         else:
-            latest_effective_date = None
-            total_records = 0
-            tenant_count = 0
+            # Simplified analysis for SCD Type 1 tables (no is_current or effective_date)
+            freshness_query = f"""
+            SELECT
+                MAX(last_updated) as latest_update_date,
+                COUNT(*) as total_records,
+                COUNT(DISTINCT tenant_id) as tenant_count
+            FROM {table_name}
+            """
+            
+            freshness_result = client.query(freshness_query)
+            if freshness_result.result_rows:
+                latest_effective_date = freshness_result.result_rows[0][0]  # Using last_updated instead
+                total_records = freshness_result.result_rows[0][1]
+                tenant_count = freshness_result.result_rows[0][2]
+            else:
+                latest_effective_date = None
+                total_records = 0
+                tenant_count = 0
+            
+            # Get completeness metrics for Type 1 tables (no is_current filter)
+            completeness_query = f"""
+            SELECT
+                COUNT(*) as total_records,
+                COUNT(CASE WHEN id IS NOT NULL AND id != '' THEN 1 END) as records_with_id,
+                COUNT(CASE WHEN tenant_id IS NOT NULL AND tenant_id != '' THEN 1 END) as records_with_tenant
+            FROM {table_name}
+            """
         
         # Calculate data freshness in hours
         if latest_effective_date:
@@ -362,16 +466,7 @@ def analyze_final_data_validation(client, table_name: str) -> Dict[str, Any]:
         else:
             data_freshness_hours = 999  # Very stale
         
-        # Get completeness metrics (simplified)
-        completeness_query = f"""
-        SELECT 
-            COUNT(*) as total_records,
-            COUNT(CASE WHEN id IS NOT NULL AND id != '' THEN 1 END) as records_with_id,
-            COUNT(CASE WHEN tenant_id IS NOT NULL AND tenant_id != '' THEN 1 END) as records_with_tenant
-        FROM {table_name}
-        WHERE is_current = 1
-        """
-        
+        # Execute completeness query
         completeness_result = client.query(completeness_query)
         if completeness_result.result_rows:
             total_for_completeness = completeness_result.result_rows[0][0]
@@ -396,6 +491,7 @@ def analyze_final_data_validation(client, table_name: str) -> Dict[str, Any]:
         return {
             'table_name': table_name,
             'stage': 'validation',
+            'scd_type': 'type_2' if is_type_2 else 'type_1',
             'total_records': total_records,
             'tenant_count': tenant_count,
             'data_freshness_hours': round(data_freshness_hours, 2),
