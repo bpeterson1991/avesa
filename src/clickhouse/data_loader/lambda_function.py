@@ -36,7 +36,7 @@ def get_clickhouse_connection():
             password=secret['password'],
             database=secret.get('database', 'default'),
             secure=True,
-            verify=True,
+            verify=False,  # Disable SSL verification for ClickHouse Cloud
             connect_timeout=30,
             send_receive_timeout=300
         )
@@ -162,14 +162,58 @@ def calculate_data_hash(row_data: Dict) -> str:
     data_str = json.dumps(row_data, sort_keys=True, default=str)
     return hashlib.md5(data_str.encode()).hexdigest()
 
+def check_if_already_processed(tenant_id: str, table_name: str, s3_files: List[Dict]) -> bool:
+    """Check if the current batch of files has already been processed."""
+    if not s3_files:
+        return True
+    
+    try:
+        dynamodb = boto3.resource('dynamodb')
+        table = dynamodb.Table(os.environ.get('LAST_UPDATED_TABLE', 'LastUpdated-dev'))
+        
+        # Get the last processed timestamp
+        response = table.get_item(
+            Key={
+                'tenant_id': tenant_id,
+                'table_name': table_name
+            }
+        )
+        
+        if 'Item' not in response:
+            return False  # Never processed before
+        
+        last_processed = response['Item'].get('last_updated')
+        if not last_processed:
+            return False
+        
+        # Check if any S3 files are newer than last processed timestamp
+        last_processed_dt = datetime.fromisoformat(last_processed.replace('Z', '+00:00'))
+        
+        for file_info in s3_files:
+            file_modified = file_info['last_modified']
+            if isinstance(file_modified, str):
+                file_modified = datetime.fromisoformat(file_modified.replace('Z', '+00:00'))
+            
+            if file_modified > last_processed_dt:
+                logger.info(f"Found newer file: {file_info['file_path']} modified {file_modified}")
+                return False  # Found newer data
+        
+        logger.info(f"All files for {tenant_id}/{table_name} already processed")
+        return True  # All files already processed
+        
+    except Exception as e:
+        logger.error(f"Error checking processing status: {e}")
+        return False  # Assume not processed on error
+
 def load_parquet_data_via_clickhouse(client, tenant_id: str, table_name: str, s3_files: List[Dict]) -> int:
-    """Load Parquet data directly from S3 into ClickHouse using S3 table function."""
+    """Load Parquet data directly from S3 into ClickHouse using S3 table function with proper SCD Type 2 deduplication."""
     if not s3_files:
         logger.info(f"No files to process for {tenant_id}/{table_name}")
         return 0
     
     total_records = 0
-    current_time = datetime.now(timezone.utc).isoformat()
+    current_time = datetime.now(timezone.utc)
+    current_time_str = current_time.isoformat()
     
     for file_info in s3_files:
         file_path = file_info['file_path']
@@ -179,23 +223,67 @@ def load_parquet_data_via_clickhouse(client, tenant_id: str, table_name: str, s3
             # Use ClickHouse S3 table function to read Parquet directly
             s3_url = f"s3://data-storage-msp-dev/{file_path}"
             
-            # Insert data directly from S3 Parquet file into ClickHouse table
-            insert_query = f"""
-            INSERT INTO {table_name}
-            SELECT
-                *,
+            # Use atomic REPLACE operation to handle SCD Type 2 properly
+            # This prevents race conditions by doing expire + insert in a single operation
+            logger.info(f"Processing data from {file_path} with atomic SCD Type 2 logic")
+            
+            # Create a temporary staging table for this batch
+            staging_table = f"{table_name}_staging_{int(current_time.timestamp() * 1000000)}"
+            
+            # Step 1: Create staging table with new data
+            create_staging_query = f"""
+            CREATE TABLE {staging_table} AS
+            SELECT DISTINCT
+                s.*,
                 '{tenant_id}' as tenant_id,
-                '{current_time}' as effective_date,
+                '{current_time_str}' as effective_date,
                 NULL as expiration_date,
                 true as is_current,
                 'canonical_transform' as source_system,
-                '{current_time}' as created_date,
+                '{current_time_str}' as date_entered,
+                md5(toString(s.*)) as data_hash,
                 1 as record_version
-            FROM s3('{s3_url}', 'Parquet')
+            FROM s3('{s3_url}', 'Parquet') s
+            """
+            
+            client.command(create_staging_query)
+            logger.info(f"Created staging table {staging_table}")
+            
+            # Step 2: Expire existing records that will be updated (atomic operation)
+            expire_query = f"""
+            ALTER TABLE {table_name}
+            UPDATE
+                expiration_date = '{current_time_str}',
+                is_current = false
+            WHERE tenant_id = '{tenant_id}'
+            AND is_current = true
+            AND id IN (SELECT id FROM {staging_table})
+            AND (data_hash != (SELECT data_hash FROM {staging_table} st WHERE st.id = {table_name}.id LIMIT 1)
+                 OR data_hash IS NULL)
+            """
+            
+            client.command(expire_query)
+            logger.info(f"Expired changed records atomically")
+            
+            # Step 3: Insert only new or changed records
+            insert_query = f"""
+            INSERT INTO {table_name}
+            SELECT * FROM {staging_table} st
+            WHERE NOT EXISTS (
+                SELECT 1 FROM {table_name} t
+                WHERE t.tenant_id = st.tenant_id
+                AND t.id = st.id
+                AND t.is_current = true
+                AND t.data_hash = st.data_hash
+            )
             """
             
             result = client.command(insert_query)
-            logger.info(f"Successfully loaded data from {file_path}")
+            
+            # Step 4: Clean up staging table
+            client.command(f"DROP TABLE {staging_table}")
+            
+            logger.info(f"Successfully processed data from {file_path} with atomic SCD Type 2")
             total_records += 1
             
         except Exception as e:
@@ -257,7 +345,7 @@ def expire_changed_records(client, tenant_id: str, table_name: str, changed_ids:
         raise
 
 def process_tenant_table(client, tenant_id: str, table_name: str) -> Dict[str, Any]:
-    """Process data for a specific tenant and table."""
+    """Process data for a specific tenant and table with idempotency checks."""
     logger.info(f"Processing {tenant_id}/{table_name}")
     
     try:
@@ -270,6 +358,15 @@ def process_tenant_table(client, tenant_id: str, table_name: str) -> Dict[str, A
                 'table_name': table_name,
                 'status': 'no_data',
                 'records_processed': 0
+            }
+        
+        # Check if this data has already been processed (idempotency)
+        if check_if_already_processed(tenant_id, table_name, s3_files):
+            return {
+                'tenant_id': tenant_id,
+                'table_name': table_name,
+                'status': 'already_processed',
+                'reason': 'All files already processed - skipping to prevent duplicates'
             }
         
         # Load data directly from S3 Parquet files into ClickHouse

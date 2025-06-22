@@ -12,6 +12,7 @@ from aws_cdk import App, Environment
 from stacks.backfill_stack import BackfillStack
 from stacks.performance_optimization_stack import PerformanceOptimizationStack
 from stacks.clickhouse_stack import ClickHouseStack
+from monitoring.data_quality_pipeline_monitoring import DataQualityPipelineMonitoringStack
 
 app = App()
 
@@ -136,9 +137,16 @@ clickhouse_stack = ClickHouseStack(
     last_updated_table_name=f"LastUpdated{env_config['table_suffix']}"
 )
 
+# Deploy comprehensive data quality pipeline monitoring stack
+monitoring_stack = DataQualityPipelineMonitoringStack(
+    app,
+    f"AVESADataQualityPipelineMonitoring{env_config['table_suffix']}",
+    env=env
+)
+
 # CONSOLIDATED INFRASTRUCTURE ARCHITECTURE:
 #
-# ACTIVE STACKS (3):
+# ACTIVE STACKS (4):
 # 1. PerformanceOptimizationStack - Consolidated core data pipeline including:
 #    - DynamoDB tables (TenantServices, LastUpdated, ProcessingJobs, ChunkProgress)
 #    - S3 data bucket with lifecycle management
@@ -157,6 +165,15 @@ clickhouse_stack = ClickHouseStack(
 #    - REST API for data access and querying
 #    - Schema management and migration tools
 #
+# 4. DataQualityPipelineMonitoringStack - Comprehensive pipeline monitoring:
+#    - End-to-end pipeline monitoring (Ingestion → Transformation → Loading → Validation)
+#    - CloudWatch dashboards for all canonical tables (companies, contacts, tickets, time_entries)
+#    - Stage-specific quality metrics and health scores
+#    - Automated duplicate detection and SCD Type 2 integrity monitoring
+#    - Data freshness and completeness validation
+#    - SNS notifications for pipeline issues and data quality problems
+#    - Scheduled Lambda function for continuous comprehensive monitoring
+#
 # REMOVED STACKS (Consolidated into PerformanceOptimizationStack):
 # - DataPipelineStack - DynamoDB tables and S3 bucket moved to PerformanceOptimizationStack
 # - MonitoringStack - Monitoring functionality integrated into PerformanceOptimizationStack
@@ -164,11 +181,12 @@ clickhouse_stack = ClickHouseStack(
 # ARCHIVED STACKS (moved to infrastructure/stacks/archive/):
 # - CrossAccountMonitoringStack - Future multi-account deployment monitoring
 #
-# This consolidated three-stack architecture provides:
+# This consolidated four-stack architecture provides:
 # - Unified resource management with reduced complexity
 # - Scalable data ingestion and transformation
 # - Historical data processing capabilities
 # - Real-time analytics and multi-tenant data access
+# - Comprehensive data quality monitoring and alerting
 # - Simplified deployment and maintenance
 
 app.synth()

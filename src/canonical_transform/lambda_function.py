@@ -471,7 +471,7 @@ def apply_scd_type2_logic(config: Config, tenant_id: str, canonical_table: str, 
         import pandas as pd
         from datetime import datetime, timezone
         
-        logger.info(f"Applying proper SCD Type 2 logic to {len(new_records)} records")
+        logger.info(f"Applying enhanced SCD Type 2 logic to {len(new_records)} records")
         
         if not new_records:
             return []
@@ -489,26 +489,53 @@ def apply_scd_type2_logic(config: Config, tenant_id: str, canonical_table: str, 
         id_field = id_field_mapping.get(canonical_table)
         
         if not id_field or id_field not in df.columns:
-            logger.error(f"ID field {id_field} not found for table {canonical_table}")
-            return new_records
+            # Fallback to 'id' if specific field not found
+            if 'id' in df.columns:
+                id_field = 'id'
+                logger.warning(f"Using fallback ID field 'id' for table {canonical_table}")
+            else:
+                logger.error(f"No valid ID field found for table {canonical_table}")
+                return new_records
         
         # Ensure updated_date is datetime
-        df['updated_date'] = pd.to_datetime(df['updated_date'])
+        if 'updated_date' in df.columns:
+            df['updated_date'] = pd.to_datetime(df['updated_date'])
+        else:
+            # Use current timestamp if no updated_date
+            df['updated_date'] = pd.Timestamp.now(tz='UTC')
+            logger.warning(f"No updated_date field found, using current timestamp")
         
-        # Step 1: For each ID, keep only the record with the latest updated_date
+        # Step 1: Remove exact duplicates first (same ID and same data hash)
+        logger.info(f"Removing exact duplicates based on ID and record content")
+        initial_count = len(df)
+        
+        # Calculate record hash for each row for duplicate detection
+        df['temp_record_hash'] = df.apply(lambda row: calculate_record_hash(row.to_dict()), axis=1)
+        
+        # Remove exact duplicates (same ID and same hash)
+        df_no_exact_dupes = df.drop_duplicates(subset=[id_field, 'temp_record_hash'], keep='last')
+        exact_dupes_removed = initial_count - len(df_no_exact_dupes)
+        
+        if exact_dupes_removed > 0:
+            logger.info(f"Removed {exact_dupes_removed} exact duplicate records")
+        
+        # Step 2: For each ID, keep only the record with the latest updated_date
         # This ensures we don't have multiple "current" records for the same ID
         logger.info(f"Deduplicating records by {id_field} and updated_date")
         
         # Sort by ID and updated_date, then keep the last (most recent) record per ID
-        df_sorted = df.sort_values([id_field, 'updated_date'])
+        df_sorted = df_no_exact_dupes.sort_values([id_field, 'updated_date'])
         df_deduplicated = df_sorted.groupby(id_field).tail(1).reset_index(drop=True)
         
         logger.info(f"Deduplicated from {len(df)} to {len(df_deduplicated)} records")
         
-        # Step 2: Apply SCD Type 2 fields to the deduplicated records
+        # Step 3: Apply SCD Type 2 fields to the deduplicated records
         scd_records = []
         for _, row in df_deduplicated.iterrows():
             record = row.to_dict()
+            
+            # Remove temporary hash field
+            record.pop('temp_record_hash', None)
             
             # Use updated_date as effective_start_date (this is the key fix)
             record['effective_start_date'] = record['updated_date']
@@ -518,13 +545,19 @@ def apply_scd_type2_logic(config: Config, tenant_id: str, canonical_table: str, 
             
             scd_records.append(record)
         
-        logger.info(f"SCD Type 2 processing complete: {len(scd_records)} unique current records")
+        logger.info(f"Enhanced SCD Type 2 processing complete: {len(scd_records)} unique current records")
         
-        # Verify no duplicates
+        # Step 4: Final verification - ensure no duplicate IDs
         ids = [record[id_field] for record in scd_records]
         unique_ids = set(ids)
         if len(ids) != len(unique_ids):
-            logger.warning(f"Found duplicate IDs after deduplication: {len(ids)} records, {len(unique_ids)} unique IDs")
+            logger.error(f"CRITICAL: Found duplicate IDs after deduplication: {len(ids)} records, {len(unique_ids)} unique IDs")
+            # Log the duplicate IDs for debugging
+            id_counts = {}
+            for record_id in ids:
+                id_counts[record_id] = id_counts.get(record_id, 0) + 1
+            duplicate_ids = [record_id for record_id, count in id_counts.items() if count > 1]
+            logger.error(f"Duplicate IDs: {duplicate_ids}")
         else:
             logger.info(f"✅ Verified: All {len(unique_ids)} records have unique IDs")
         
