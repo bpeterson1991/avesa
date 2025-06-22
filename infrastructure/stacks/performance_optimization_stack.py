@@ -9,6 +9,7 @@ from aws_cdk import (
     Stack,
     Duration,
     RemovalPolicy,
+    BundlingOptions,
     aws_lambda as _lambda,
     aws_dynamodb as dynamodb,
     aws_s3 as s3,
@@ -33,6 +34,9 @@ try:
     from dashboards import PipelineDashboards
 except ImportError:
     PipelineDashboards = None
+
+# Import shared bundling utilities
+from infrastructure.shared.bundling_utils import BundlingOptionsFactory
 
 
 class PerformanceOptimizationStack(Stack):
@@ -386,6 +390,8 @@ class PerformanceOptimizationStack(Stack):
         # Create state machines first so we can reference them
         state_machines = self._create_state_machines_early()
         
+        # Use standardized bundling options from shared utilities
+
         # Pipeline Orchestrator with STATE_MACHINE_ARN
         orchestrator_env = common_env.copy()
         orchestrator_env["STATE_MACHINE_ARN"] = state_machines['pipeline_orchestrator'].state_machine_arn
@@ -396,7 +402,10 @@ class PerformanceOptimizationStack(Stack):
             function_name=f"avesa-pipeline-orchestrator-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="lambda_function.lambda_handler",
-            code=_lambda.Code.from_asset("../lambda-packages/optimized-orchestrator.zip"),
+            code=_lambda.Code.from_asset(
+                "../src/optimized/orchestrator",
+                bundling=BundlingOptionsFactory.get_python_bundling()
+            ),
             role=self.lambda_execution_role,
             memory_size=512,
             timeout=Duration.seconds(300),
@@ -411,7 +420,10 @@ class PerformanceOptimizationStack(Stack):
             function_name=f"avesa-tenant-processor-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="tenant_processor.lambda_handler",
-            code=_lambda.Code.from_asset("../lambda-packages/optimized-processors.zip"),
+            code=_lambda.Code.from_asset(
+                "../src/optimized/processors",
+                bundling=BundlingOptionsFactory.get_python_bundling()
+            ),
             role=self.lambda_execution_role,
             memory_size=512,
             timeout=Duration.seconds(300),
@@ -426,7 +438,10 @@ class PerformanceOptimizationStack(Stack):
             function_name=f"avesa-table-processor-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="table_processor.lambda_handler",
-            code=_lambda.Code.from_asset("../lambda-packages/optimized-processors.zip"),
+            code=_lambda.Code.from_asset(
+                "../src/optimized/processors",
+                bundling=BundlingOptionsFactory.get_python_bundling()
+            ),
             role=self.lambda_execution_role,
             memory_size=512,
             timeout=Duration.seconds(300),
@@ -441,7 +456,10 @@ class PerformanceOptimizationStack(Stack):
             function_name=f"avesa-chunk-processor-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="chunk_processor.lambda_handler",
-            code=_lambda.Code.from_asset("../lambda-packages/optimized-processors.zip"),
+            code=_lambda.Code.from_asset(
+                "../src/optimized/processors",
+                bundling=BundlingOptionsFactory.get_python_bundling()
+            ),
             role=self.lambda_execution_role,
             memory_size=1024,  # Higher memory for data processing
             timeout=Duration.seconds(900),  # 15 minutes
@@ -456,7 +474,10 @@ class PerformanceOptimizationStack(Stack):
             function_name=f"avesa-error-handler-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="error_handler.lambda_handler",
-            code=_lambda.Code.from_asset("../lambda-packages/optimized-processors.zip"),
+            code=_lambda.Code.from_asset(
+                "../src/optimized/helpers",
+                bundling=BundlingOptionsFactory.get_python_bundling()
+            ),
             role=self.lambda_execution_role,
             memory_size=256,
             timeout=Duration.seconds(60),
@@ -471,7 +492,10 @@ class PerformanceOptimizationStack(Stack):
             function_name=f"avesa-result-aggregator-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="result_aggregator.lambda_handler",
-            code=_lambda.Code.from_asset("../lambda-packages/optimized-processors.zip"),
+            code=_lambda.Code.from_asset(
+                "../src/optimized/helpers",
+                bundling=BundlingOptionsFactory.get_python_bundling()
+            ),
             role=self.lambda_execution_role,
             memory_size=512,
             timeout=Duration.seconds(300),
@@ -486,7 +510,10 @@ class PerformanceOptimizationStack(Stack):
             function_name=f"avesa-completion-notifier-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="completion_notifier.lambda_handler",
-            code=_lambda.Code.from_asset("../lambda-packages/optimized-processors.zip"),
+            code=_lambda.Code.from_asset(
+                "../src/optimized/helpers",
+                bundling=BundlingOptionsFactory.get_python_bundling()
+            ),
             role=self.lambda_execution_role,
             memory_size=256,
             timeout=Duration.seconds(60),
@@ -494,37 +521,160 @@ class PerformanceOptimizationStack(Stack):
             log_retention=logs.RetentionDays.ONE_MONTH
         )
 
+        # Canonical Transform Functions using CDK bundling
+        canonical_tables = ['companies', 'contacts', 'tickets', 'time_entries']
+        for table in canonical_tables:
+            functions[f'canonical_transform_{table}'] = _lambda.Function(
+                self,
+                f"CanonicalTransform{table.title().replace('_', '')}Lambda",
+                function_name=f"avesa-canonical-transform-{table.replace('_', '-')}-{self.env_name}",
+                runtime=_lambda.Runtime.PYTHON_3_9,
+                handler="lambda_function.lambda_handler",
+                code=_lambda.Code.from_asset(
+                    "../src/canonical_transform",
+                    bundling=BundlingOptionsFactory.get_python_bundling()
+                ),
+                role=self.lambda_execution_role,
+                memory_size=1024,
+                timeout=Duration.seconds(900),
+                environment=common_env,
+                log_retention=logs.RetentionDays.ONE_MONTH
+            )
+
+        # ClickHouse Loader Functions using CDK bundling
+        for table in canonical_tables:
+            functions[f'clickhouse_loader_{table}'] = _lambda.Function(
+                self,
+                f"ClickhouseLoader{table.title().replace('_', '')}Lambda",
+                function_name=f"clickhouse-loader-{table.replace('_', '-')}-{self.env_name}",
+                runtime=_lambda.Runtime.PYTHON_3_9,
+                handler="lambda_function.lambda_handler",
+                code=_lambda.Code.from_asset(
+                    "../src/clickhouse/data_loader",
+                    bundling=BundlingOptionsFactory.get_python_bundling()
+                ),
+                role=self.lambda_execution_role,
+                memory_size=1024,
+                timeout=Duration.seconds(900),
+                environment=common_env,
+                log_retention=logs.RetentionDays.ONE_MONTH
+            )
+
         return functions, state_machines
 
     def _create_state_machines_early(self) -> Dict[str, sfn.StateMachine]:
-        """Create Step Functions state machines early so Lambda can reference them."""
+        """Create Step Functions state machines using CDK native constructs."""
         state_machines = {}
 
-        # Load state machine definitions
-        state_machine_dir = "../src/optimized/state_machines"
-        
-        # Pipeline Orchestrator State Machine
-        with open(f"{state_machine_dir}/pipeline_orchestrator.json", 'r') as f:
-            orchestrator_definition = json.load(f)
-        
-        # Replace placeholders in the definition
-        orchestrator_definition_str = json.dumps(orchestrator_definition)
-        orchestrator_definition_str = orchestrator_definition_str.replace(
-            "${AWS::Region}", self.region
-        ).replace(
-            "${AWS::AccountId}", self.account
-        ).replace(
-            "${Environment}", self.env_name
+        # Create placeholder Lambda functions for state machine references
+        # These will be replaced with actual functions later
+        placeholder_lambda = _lambda.Function(
+            self,
+            "PlaceholderLambda",
+            function_name=f"avesa-placeholder-{self.env_name}",
+            runtime=_lambda.Runtime.PYTHON_3_9,
+            handler="index.handler",
+            code=_lambda.Code.from_inline("def handler(event, context): return event"),
+            role=self.lambda_execution_role,
+            timeout=Duration.seconds(30)
         )
-        orchestrator_definition = json.loads(orchestrator_definition_str)
+
+        # Pipeline Orchestrator State Machine using CDK native constructs
+        # Initialize pipeline
+        initialize_pipeline = sfn.Pass(
+            self,
+            "InitializePipeline",
+            comment="Pipeline already initialized by orchestrator Lambda",
+            result=sfn.Result.from_string("Pipeline initialized"),
+            result_path="$.initialization_status"
+        )
+
+        # Determine processing mode
+        determine_mode = sfn.Choice(self, "DetermineProcessingMode")
+        
+        # Multi-tenant processing
+        multi_tenant_processing = sfn.Map(
+            self,
+            "MultiTenantProcessing",
+            items_path="$.tenants",
+            max_concurrency=10,
+            parameters={
+                "tenant_config.$": "$$.Map.Item.Value",
+                "job_id.$": "$.job_id",
+                "table_name.$": "$.table_name",
+                "force_full_sync.$": "$.force_full_sync",
+                "execution_id.$": "$$.Execution.Name"
+            }
+        )
+
+        # Single tenant processing
+        single_tenant_processing = sfn_tasks.StepFunctionsStartExecution(
+            self,
+            "SingleTenantProcessing",
+            state_machine=placeholder_lambda,  # Will be updated with actual state machine
+            integration_pattern=sfn.IntegrationPattern.RUN_JOB,
+            input=sfn.TaskInput.from_object({
+                "tenant_config.$": "$.tenants[0]",
+                "job_id.$": "$.job_id",
+                "table_name.$": "$.table_name",
+                "force_full_sync.$": "$.force_full_sync",
+                "execution_id.$": "$$.Execution.Name"
+            }),
+            result_path="$.tenant_result"
+        )
+
+        # Result aggregation
+        aggregate_results = sfn_tasks.LambdaInvoke(
+            self,
+            "AggregateResults",
+            lambda_function=placeholder_lambda,  # Will be updated with actual function
+            payload=sfn.TaskInput.from_object({
+                "job_id.$": "$.job_id",
+                "results.$": "$",
+                "processing_mode": "multi-tenant"
+            }),
+            result_path="$.aggregation_result"
+        )
+
+        # Completion notification
+        notify_completion = sfn_tasks.LambdaInvoke(
+            self,
+            "NotifyCompletion",
+            lambda_function=placeholder_lambda,  # Will be updated with actual function
+            payload=sfn.TaskInput.from_object({
+                "job_id.$": "$.job_id",
+                "results.$": "$",
+                "execution_arn.$": "$$.Execution.Name"
+            })
+        )
+
+        # Error handling
+        handle_invalid_mode = sfn.Fail(
+            self,
+            "HandleInvalidMode",
+            cause="Invalid processing mode specified",
+            error="InvalidProcessingMode"
+        )
+
+        # Build the state machine definition
+        definition = initialize_pipeline.next(
+            determine_mode
+            .when(
+                sfn.Condition.string_equals("$.mode", "multi-tenant"),
+                multi_tenant_processing.next(aggregate_results).next(notify_completion)
+            )
+            .when(
+                sfn.Condition.string_equals("$.mode", "single-tenant"),
+                single_tenant_processing.next(aggregate_results).next(notify_completion)
+            )
+            .otherwise(handle_invalid_mode)
+        )
 
         state_machines['pipeline_orchestrator'] = sfn.StateMachine(
             self,
             "PipelineOrchestratorStateMachine",
             state_machine_name=f"PipelineOrchestrator-{self.env_name}",
-            definition_body=sfn.DefinitionBody.from_string(
-                json.dumps(orchestrator_definition)
-            ),
+            definition=definition,
             role=self.step_functions_role,
             timeout=Duration.hours(6),
             logs=sfn.LogOptions(
@@ -538,27 +688,73 @@ class PerformanceOptimizationStack(Stack):
             )
         )
 
-        # Tenant Processor State Machine
-        with open(f"{state_machine_dir}/tenant_processor.json", 'r') as f:
-            tenant_definition = json.load(f)
-        
-        tenant_definition_str = json.dumps(tenant_definition)
-        tenant_definition_str = tenant_definition_str.replace(
-            "${AWS::Region}", self.region
-        ).replace(
-            "${AWS::AccountId}", self.account
-        ).replace(
-            "${Environment}", self.env_name
+        # Tenant Processor State Machine using CDK native constructs
+        discover_tables = sfn_tasks.LambdaInvoke(
+            self,
+            "DiscoverTenantTables",
+            lambda_function=placeholder_lambda,  # Will be updated with actual function
+            payload=sfn.TaskInput.from_object({
+                "tenant_config.$": "$.tenant_config",
+                "job_id.$": "$.job_id",
+                "table_name.$": "$.table_name",
+                "force_full_sync.$": "$.force_full_sync"
+            }),
+            result_path="$.table_discovery"
         )
-        tenant_definition = json.loads(tenant_definition_str)
+
+        validate_discovery = sfn.Choice(self, "ValidateTableDiscovery")
+        
+        parallel_table_processing = sfn.Map(
+            self,
+            "ParallelTableProcessing",
+            items_path="$.table_discovery.table_discovery.enabled_tables",
+            max_concurrency=4,
+            parameters={
+                "table_config.$": "$$.Map.Item.Value",
+                "tenant_config.$": "$.tenant_config",
+                "job_id.$": "$.job_id",
+                "force_full_sync.$": "$.force_full_sync",
+                "execution_id.$": "$.execution_id"
+            }
+        )
+
+        evaluate_results = sfn_tasks.LambdaInvoke(
+            self,
+            "EvaluateTableResults",
+            lambda_function=placeholder_lambda,  # Will be updated with actual function
+            payload=sfn.TaskInput.from_object({
+                "tenant_id.$": "$.tenant_config.tenant_id",
+                "job_id.$": "$.job_id",
+                "table_results.$": "$.table_results"
+            }),
+            result_path="$.evaluation"
+        )
+
+        no_tables_found = sfn.Pass(
+            self,
+            "NoTablesFound",
+            parameters={
+                "tenant_id.$": "$.tenant_config.tenant_id",
+                "status": "completed",
+                "message": "No tables found for tenant",
+                "table_count": 0
+            }
+        )
+
+        tenant_definition = discover_tables.next(
+            validate_discovery
+            .when(
+                sfn.Condition.is_present("$.table_discovery.table_discovery.enabled_tables"),
+                parallel_table_processing.next(evaluate_results)
+            )
+            .otherwise(no_tables_found)
+        )
 
         state_machines['tenant_processor'] = sfn.StateMachine(
             self,
             "TenantProcessorStateMachine",
             state_machine_name=f"TenantProcessor-{self.env_name}",
-            definition_body=sfn.DefinitionBody.from_string(
-                json.dumps(tenant_definition)
-            ),
+            definition=tenant_definition,
             role=self.step_functions_role,
             timeout=Duration.hours(4),
             logs=sfn.LogOptions(
@@ -572,27 +768,75 @@ class PerformanceOptimizationStack(Stack):
             )
         )
 
-        # Table Processor State Machine
-        with open(f"{state_machine_dir}/table_processor.json", 'r') as f:
-            table_definition = json.load(f)
-        
-        table_definition_str = json.dumps(table_definition)
-        table_definition_str = table_definition_str.replace(
-            "${AWS::Region}", self.region
-        ).replace(
-            "${AWS::AccountId}", self.account
-        ).replace(
-            "${Environment}", self.env_name
+        # Table Processor State Machine using CDK native constructs
+        initialize_table = sfn_tasks.LambdaInvoke(
+            self,
+            "InitializeTableProcessing",
+            lambda_function=placeholder_lambda,  # Will be updated with actual function
+            payload=sfn.TaskInput.from_object({
+                "table_config.$": "$.table_config",
+                "tenant_config.$": "$.tenant_config",
+                "job_id.$": "$.job_id",
+                "force_full_sync.$": "$.force_full_sync"
+            }),
+            result_path="$.table_processing_result"
         )
-        table_definition = json.loads(table_definition_str)
+
+        validate_chunks = sfn.Choice(self, "ValidateChunkPlan")
+        
+        process_chunks = sfn.Map(
+            self,
+            "ProcessChunks",
+            items_path="$.table_processing_result.chunk_plan.chunks",
+            max_concurrency=3,
+            parameters={
+                "chunk_config.$": "$$.Map.Item.Value",
+                "table_config.$": "$.table_config",
+                "tenant_config.$": "$.tenant_config",
+                "job_id.$": "$.job_id",
+                "table_state.$": "$.table_processing_result.table_state"
+            }
+        )
+
+        evaluate_chunk_results = sfn_tasks.LambdaInvoke(
+            self,
+            "EvaluateChunkResults",
+            lambda_function=placeholder_lambda,  # Will be updated with actual function
+            payload=sfn.TaskInput.from_object({
+                "job_id.$": "$.job_id",
+                "table_name.$": "$.table_config.table_name",
+                "tenant_id.$": "$.tenant_config.tenant_id",
+                "chunk_results.$": "$.chunk_results"
+            }),
+            result_path="$.table_evaluation"
+        )
+
+        no_data_to_process = sfn.Pass(
+            self,
+            "NoDataToProcess",
+            parameters={
+                "table_name.$": "$.table_config.table_name",
+                "tenant_id.$": "$.tenant_config.tenant_id",
+                "status": "completed",
+                "message": "No new data to process",
+                "records_processed": 0
+            }
+        )
+
+        table_definition = initialize_table.next(
+            validate_chunks
+            .when(
+                sfn.Condition.number_greater_than("$.table_processing_result.chunk_plan.total_chunks", 0),
+                process_chunks.next(evaluate_chunk_results)
+            )
+            .otherwise(no_data_to_process)
+        )
 
         state_machines['table_processor'] = sfn.StateMachine(
             self,
             "TableProcessorStateMachine",
             state_machine_name=f"TableProcessor-{self.env_name}",
-            definition_body=sfn.DefinitionBody.from_string(
-                json.dumps(table_definition)
-            ),
+            definition=table_definition,
             role=self.step_functions_role,
             timeout=Duration.hours(2),
             logs=sfn.LogOptions(

@@ -7,47 +7,16 @@ managing historical data versioning and ensuring data integrity.
 
 import json
 import os
-import boto3
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, List
-import clickhouse_connect
-from botocore.exceptions import ClientError
+
+# Import shared components
+from shared import ClickHouseClient
 
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
-
-def get_clickhouse_connection():
-    """Get ClickHouse connection using credentials from AWS Secrets Manager."""
-    secrets_client = boto3.client('secretsmanager')
-    secret_name = os.environ['CLICKHOUSE_SECRET_NAME']
-    
-    try:
-        response = secrets_client.get_secret_value(SecretId=secret_name)
-        secret = json.loads(response['SecretString'])
-        
-        # Connect to ClickHouse Cloud
-        client = clickhouse_connect.get_client(
-            host=secret['host'],
-            port=secret.get('port', 8443),
-            username=secret['username'],
-            password=secret['password'],
-            database=secret.get('database', 'default'),
-            secure=True,
-            verify=True,
-            connect_timeout=30,
-            send_receive_timeout=300
-        )
-        
-        return client
-        
-    except ClientError as e:
-        logger.error(f"Failed to retrieve ClickHouse credentials: {e}")
-        raise
-    except Exception as e:
-        logger.error(f"Failed to connect to ClickHouse: {e}")
-        raise
 
 def optimize_table_partitions(client, table_name: str) -> Dict[str, Any]:
     """Optimize table partitions for better performance."""
@@ -386,8 +355,13 @@ def lambda_handler(event, context):
     logger.info(f"Event: {json.dumps(event, default=str)}")
     
     try:
-        # Get ClickHouse connection
-        client = get_clickhouse_connection()
+        # Get environment configuration using proper pattern
+        from shared.environment import Environment
+        env_name = os.environ.get('ENVIRONMENT', 'dev')
+        config = Environment.get_config(env_name)
+        
+        # Get ClickHouse connection using shared client
+        client = ClickHouseClient.from_environment(os.environ.get('ENVIRONMENT', 'dev'))
         logger.info("Successfully connected to ClickHouse")
         
         # Determine tables to process

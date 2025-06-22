@@ -7,52 +7,22 @@ It handles tenant isolation, SCD Type 2 processing, and data quality validation.
 
 import json
 import os
-import boto3
 import logging
 import hashlib
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
-import clickhouse_connect
-from botocore.exceptions import ClientError
+
+# Import shared components
+from shared import ClickHouseClient, AWSClientFactory
 
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-def get_clickhouse_connection():
-    """Get ClickHouse connection using credentials from AWS Secrets Manager."""
-    secrets_client = boto3.client('secretsmanager')
-    secret_name = os.environ['CLICKHOUSE_SECRET_NAME']
-    
-    try:
-        response = secrets_client.get_secret_value(SecretId=secret_name)
-        secret = json.loads(response['SecretString'])
-        
-        # Connect to ClickHouse Cloud
-        client = clickhouse_connect.get_client(
-            host=secret['host'],
-            port=secret.get('port', 8443),
-            username=secret['username'],
-            password=secret['password'],
-            database=secret.get('database', 'default'),
-            secure=True,
-            verify=False,  # Disable SSL verification for ClickHouse Cloud
-            connect_timeout=30,
-            send_receive_timeout=300
-        )
-        
-        return client
-        
-    except ClientError as e:
-        logger.error(f"Failed to retrieve ClickHouse credentials: {e}")
-        raise
-    except Exception as e:
-        logger.error(f"Failed to connect to ClickHouse: {e}")
-        raise
-
 def get_tenant_list() -> List[str]:
     """Get list of active tenants from DynamoDB."""
-    dynamodb = boto3.resource('dynamodb')
+    clients = AWSClientFactory.get_client_bundle(['dynamodb'])
+    dynamodb = clients['dynamodb']
     table = dynamodb.Table(os.environ['TENANT_SERVICES_TABLE'])
     
     try:
@@ -72,7 +42,8 @@ def get_tenant_list() -> List[str]:
 
 def get_last_updated_timestamp(tenant_id: str, table_name: str) -> Optional[str]:
     """Get the last updated timestamp for incremental processing."""
-    dynamodb = boto3.resource('dynamodb')
+    clients = AWSClientFactory.get_client_bundle(['dynamodb'])
+    dynamodb = clients['dynamodb']
     table = dynamodb.Table(os.environ['LAST_UPDATED_TABLE'])
     
     try:
@@ -93,7 +64,8 @@ def get_last_updated_timestamp(tenant_id: str, table_name: str) -> Optional[str]
 
 def update_last_updated_timestamp(tenant_id: str, table_name: str, timestamp: str):
     """Update the last updated timestamp after successful processing."""
-    dynamodb = boto3.resource('dynamodb')
+    clients = AWSClientFactory.get_client_bundle(['dynamodb'])
+    dynamodb = clients['dynamodb']
     table = dynamodb.Table(os.environ['LAST_UPDATED_TABLE'])
     
     try:
@@ -113,7 +85,8 @@ def update_last_updated_timestamp(tenant_id: str, table_name: str, timestamp: st
 
 def load_canonical_data_from_s3(tenant_id: str, table_name: str) -> List[Dict]:
     """Load canonical data from S3 for a specific tenant and table."""
-    s3_client = boto3.client('s3')
+    clients = AWSClientFactory.get_client_bundle(['s3'])
+    s3_client = clients['s3']
     bucket_name = os.environ['S3_BUCKET_NAME']
     
     # Construct S3 path for canonical data
@@ -168,7 +141,8 @@ def check_if_already_processed(tenant_id: str, table_name: str, s3_files: List[D
         return True
     
     try:
-        dynamodb = boto3.resource('dynamodb')
+        clients = AWSClientFactory.get_client_bundle(['dynamodb'])
+        dynamodb = clients['dynamodb']
         table = dynamodb.Table(os.environ.get('LAST_UPDATED_TABLE', 'LastUpdated-dev'))
         
         # Get the last processed timestamp
@@ -411,8 +385,13 @@ def lambda_handler(event, context):
     target_table = os.environ.get('TARGET_TABLE')
     
     try:
-        # Get ClickHouse connection
-        client = get_clickhouse_connection()
+        # Get environment configuration using proper pattern
+        from shared.environment import Environment
+        env_name = os.environ.get('ENVIRONMENT', 'dev')
+        config = Environment.get_config(env_name)
+        
+        # Get ClickHouse connection using shared client
+        client = ClickHouseClient.from_environment(os.environ.get('ENVIRONMENT', 'dev'))
         logger.info("Successfully connected to ClickHouse")
         
         # Determine processing scope

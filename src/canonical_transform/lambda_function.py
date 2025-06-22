@@ -17,9 +17,10 @@ import sys
 from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 
-# Add AWS layer and shared module to path
-sys.path.append('/opt/python/lib/python3.9/site-packages')
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'shared'))
+# Setup paths using shared utilities
+from shared.path_utils import PathManager
+PathManager.setup_lambda_paths()
+PathManager.setup_src_path(__file__)
 
 try:
     # Try direct imports (Lambda package has modules in root)
@@ -44,9 +45,15 @@ except ImportError as e:
         from logger import PipelineLogger
         from utils import get_timestamp, get_s3_key
 
-# Initialize clients
-dynamodb = get_dynamodb_client()
-s3 = get_s3_client()
+# Initialize clients using shared factory
+from shared import AWSClientFactory, CanonicalMapper
+aws_factory = AWSClientFactory()
+clients = aws_factory.get_client_bundle(['dynamodb', 's3'])
+dynamodb = clients['dynamodb']
+s3 = clients['s3']
+
+# Initialize canonical mapper
+canonical_mapper = CanonicalMapper(s3_client=s3)
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -61,6 +68,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         Execution summary
     """
     logger = PipelineLogger("canonical_transform")
+    
+    # Get environment configuration using proper pattern
+    from shared.environment import Environment
+    env_name = os.environ.get('ENVIRONMENT', 'dev')
+    env_config = Environment.get_config(env_name)
+    
     config = Config.from_environment()
     
     # Get canonical table from environment variable
@@ -75,7 +88,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         }
     
     try:
-        logger.info(f"Starting canonical transformation for table: {canonical_table}", 
+        logger.info(f"Starting canonical transformation for table: {canonical_table}",
                    execution_id=context.aws_request_id)
         
         # Get target tenant from event (optional)
@@ -354,14 +367,8 @@ def find_raw_data_files(config: Config, tenant_id: str, canonical_table: str, lo
 
 
 def get_source_mapping(canonical_table: str) -> Optional[Dict[str, str]]:
-    """Get source service and table mapping for canonical table."""
-    mappings = {
-        'tickets': {'service': 'connectwise', 'table': 'tickets'},
-        'time_entries': {'service': 'connectwise', 'table': 'time_entries'},
-        'companies': {'service': 'connectwise', 'table': 'companies'},
-        'contacts': {'service': 'connectwise', 'table': 'contacts'}
-    }
-    return mappings.get(canonical_table)
+    """Get source service and table mapping for canonical table using shared CanonicalMapper."""
+    return canonical_mapper.get_source_mapping(canonical_table)
 
 
 def load_and_transform_raw_data(config: Config, s3_key: str, canonical_table: str, logger: PipelineLogger) -> List[Dict[str, Any]]:
@@ -408,140 +415,16 @@ def load_and_transform_raw_data(config: Config, s3_key: str, canonical_table: st
         return []
 
 
+# Canonical mapping and transformation functions now use shared CanonicalMapper
 def load_canonical_mapping(canonical_table: str) -> Dict[str, Any]:
-    """Load canonical mapping configuration using shared utilities."""
-    try:
-        # Use the shared utility function which handles bundled mappings
-        from utils import load_canonical_mapping as shared_load_canonical_mapping
-        mapping = shared_load_canonical_mapping(canonical_table)
-        
-        # If no mapping found, use default mapping as fallback
-        if not mapping:
-            return get_default_mapping(canonical_table)
-        
-        return mapping
-    except Exception as e:
-        print(f"Failed to load canonical mapping, using default: {e}")
-        # Fallback to default mapping
-        return get_default_mapping(canonical_table)
-
-
-def get_default_mapping(canonical_table: str) -> Dict[str, Any]:
-    """Get default mapping for canonical table."""
-    default_mappings = {
-        'tickets': {
-            'id_field': 'id',
-            'fields': {
-                'ticket_id': 'id',
-                'summary': 'summary',
-                'description': 'description',
-                'status': 'status__name',
-                'priority': 'priority__name',
-                'created_date': '_info__dateEntered',
-                'updated_date': '_info__lastUpdated'
-            }
-        },
-        'time_entries': {
-            'id_field': 'id',
-            'fields': {
-                'entry_id': 'id',
-                'ticket_id': 'ticket__id',
-                'hours': 'actualHours',
-                'description': 'notes',
-                'date_start': 'timeStart',
-                'date_end': 'timeEnd'
-            }
-        },
-        'companies': {
-            'id_field': 'id',
-            'fields': {
-                'company_id': 'id',
-                'name': 'name',
-                'type': 'type__name',
-                'status': 'status__name',
-                'created_date': '_info__dateEntered',
-                'updated_date': '_info__lastUpdated'
-            }
-        },
-        'contacts': {
-            'id_field': 'id',
-            'fields': {
-                'contact_id': 'id',
-                'company_id': 'company__id',
-                'first_name': 'firstName',
-                'last_name': 'lastName',
-                'email': 'communicationItems',
-                'created_date': '_info__dateEntered',
-                'updated_date': '_info__lastUpdated'
-            }
-        }
-    }
-    return default_mappings.get(canonical_table, {})
+    """Load canonical mapping configuration using shared CanonicalMapper."""
+    bucket_name = os.environ.get('BUCKET_NAME')
+    return canonical_mapper.load_mapping(canonical_table, bucket=bucket_name)
 
 
 def transform_record(raw_record: Dict[str, Any], mapping: Dict[str, Any], canonical_table: str) -> Optional[Dict[str, Any]]:
-    """Transform a single record to canonical format."""
-    try:
-        transformed = {}
-        
-        # Apply field mappings
-        for canonical_field, source_field in mapping.get('fields', {}).items():
-            value = get_nested_value(raw_record, source_field)
-            transformed[canonical_field] = value
-        
-        # Add metadata
-        transformed['source_system'] = 'connectwise'
-        transformed['source_table'] = get_source_mapping(canonical_table)['table']
-        transformed['ingestion_timestamp'] = get_timestamp()
-        transformed['canonical_table'] = canonical_table
-        
-        # Add SCD Type 2 fields - use updated_date from source as effective_start_date
-        source_updated_date = transformed.get('updated_date')
-        if source_updated_date:
-            # Use the source updated_date as effective_start_date
-            transformed['effective_start_date'] = source_updated_date
-        else:
-            # Fallback to current timestamp if no updated_date available
-            transformed['effective_start_date'] = get_timestamp()
-        
-        transformed['effective_end_date'] = None
-        transformed['is_current'] = True
-        transformed['record_hash'] = calculate_record_hash(transformed)
-        
-        return transformed
-        
-    except Exception as e:
-        return None
-
-
-def get_nested_value(data: Dict[str, Any], key: str) -> Any:
-    """Get nested value from dictionary using dot notation."""
-    try:
-        keys = key.split('__')
-        value = data
-        for k in keys:
-            if isinstance(value, dict):
-                value = value.get(k)
-            else:
-                return None
-        return value
-    except:
-        return None
-
-
-def calculate_record_hash(record: Dict[str, Any]) -> str:
-    """Calculate hash for record to detect changes."""
-    import hashlib
-    
-    # Create a copy without SCD fields for hashing
-    hash_record = record.copy()
-    scd_fields = ['effective_start_date', 'effective_end_date', 'is_current', 'record_hash', 'ingestion_timestamp']
-    for field in scd_fields:
-        hash_record.pop(field, None)
-    
-    # Sort keys for consistent hashing
-    sorted_record = json.dumps(hash_record, sort_keys=True, default=str)
-    return hashlib.md5(sorted_record.encode()).hexdigest()
+    """Transform a single record to canonical format using shared CanonicalMapper."""
+    return canonical_mapper.transform_record(raw_record, mapping, canonical_table)
 
 
 def apply_scd_type2_logic(config: Config, tenant_id: str, canonical_table: str, new_records: List[Dict[str, Any]], logger: PipelineLogger) -> List[Dict[str, Any]]:

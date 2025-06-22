@@ -1,4 +1,4 @@
-# AVESA Multi-Tenant Data Pipeline
+# AVESA Multi-Tenant Data Pipeline & Analytics Platform
 
 **Last Updated:** December 19, 2025  
 **Architecture Version:** 3.0.0 - Optimized Parallel Processing Architecture  
@@ -6,24 +6,103 @@
 
 A high-performance multi-tenant data ingestion and transformation pipeline supporting 30+ integration services with optimized parallel processing, intelligent chunking, and comprehensive monitoring. Built using AWS serverless technologies with canonical data modeling and SCD Type 2 historical tracking.
 
-## 🚀 Performance Achievements
+## 🚀 Quick Start
 
-- ✅ **10x throughput improvement** - Parallel processing at tenant, table, and chunk levels
-- ✅ **95% reduction in Lambda timeouts** - Intelligent chunking and resumable processing
-- ✅ **5x improvement in API efficiency** - Concurrent API calls and optimized pagination
-- ✅ **Real-time progress visibility** - Comprehensive CloudWatch dashboards and metrics
-- ✅ **Zero-downtime migration** - Successfully migrated from legacy sequential processing
+### Prerequisites
 
-## 🔧 Recent Updates
+- **AWS CLI** configured with appropriate permissions
+- **Python 3.9+** with pip
+- **Node.js 18+** (for AWS CDK and frontend)
+- **AWS CDK CLI** installed: `npm install -g aws-cdk`
 
-### Production-Ready Architecture (December 2025)
-- ✅ **Optimized Performance**: 10x throughput improvement through multi-level parallelization
-- ✅ **Consistent Table Naming**: Standardized naming convention across all endpoints and services
-- ✅ **Comprehensive Monitoring**: Real-time dashboards and automated alerting
-- ✅ **Enterprise Security**: AWS Secrets Manager integration and IAM least privilege
-- ✅ **Scalable Infrastructure**: Step Functions orchestration with Lambda-based processing
+### Development Setup
 
-## Architecture Overview
+1. **Clone and setup the project:**
+```bash
+git clone <repository-url>
+cd avesa
+pip install -r requirements.txt
+```
+
+2. **Start the full-stack development environment:**
+```bash
+./scripts/start-development-environment.sh
+```
+
+This script will:
+- Install all dependencies
+- Start the Node.js API server on port 3001
+- Start the React frontend on port 3000
+- Open your browser automatically
+
+3. **Login with demo credentials:**
+- **Tenant ID**: `sitetechnology`
+- **Email**: `admin@sitetechnology.com`
+- **Password**: `demo123`
+
+### Infrastructure Deployment
+
+#### Development Environment
+```bash
+./scripts/deploy.sh --environment dev
+```
+
+#### Staging Environment
+```bash
+./scripts/deploy.sh --environment staging
+```
+
+#### Production Environment
+```bash
+./scripts/deploy.sh --environment prod
+```
+
+### Configure Tenant Services
+
+Add ConnectWise service for a tenant:
+
+```bash
+python scripts/setup-service.py \
+  --tenant-id "example-tenant" \
+  --company-name "Example Company" \
+  --service connectwise \
+  --environment dev
+```
+
+The script will prompt for ConnectWise credentials or you can provide them via environment variables:
+
+```bash
+export CONNECTWISE_API_URL="https://api-na.myconnectwise.net"
+export CONNECTWISE_COMPANY_ID="YourCompanyID"
+export CONNECTWISE_PUBLIC_KEY="your-public-key"
+export CONNECTWISE_PRIVATE_KEY="your-private-key"
+export CONNECTWISE_CLIENT_ID="your-client-id"
+```
+
+### Test the Pipeline
+
+```bash
+# Test optimized pipeline
+python scripts/test-end-to-end-pipeline.py --environment dev --region us-east-2
+
+# Test specific Lambda function
+aws lambda invoke \
+  --function-name avesa-pipeline-orchestrator-dev \
+  --payload '{"tenant_id": "example-tenant"}' \
+  response.json
+```
+
+## 🏗️ Architecture Overview
+
+### Full-Stack Platform Components
+
+AVESA is a comprehensive analytics platform that provides:
+
+- **Multi-tenant data isolation** with ClickHouse Cloud
+- **Real-time analytics dashboard** with interactive charts
+- **Secure authentication** with JWT and role-based access control
+- **Scalable data pipeline** for processing canonical business data
+- **Modern React frontend** with TypeScript and Tailwind CSS
 
 ### Optimized Multi-Level Parallelization
 
@@ -78,6 +157,163 @@ The AVESA pipeline implements a sophisticated three-tier parallel processing arc
    - Tenant and table processing coordination
    - Error handling and retry logic
 
+6. **React Frontend** ([`frontend/`](frontend/))
+   - Modern React 18 with TypeScript
+   - Real-time analytics dashboard
+   - Multi-tenant authentication and data access
+   - Interactive charts and visualizations
+
+7. **Node.js API Server** ([`src/clickhouse/api/`](src/clickhouse/api/))
+   - Express-based REST API
+   - JWT authentication and authorization
+   - ClickHouse database integration
+   - Tenant-aware data access
+
+## 🔧 Technology Stack
+
+### Frontend
+- **React 18** with TypeScript
+- **React Router** for navigation
+- **React Query** for data fetching and caching
+- **Tailwind CSS** for styling
+- **Recharts** for data visualization
+- **Heroicons** for icons
+
+### Backend
+- **Node.js** with Express
+- **JWT** for authentication
+- **ClickHouse** for analytics database
+- **AWS Lambda** for serverless processing
+- **AWS S3** for data storage
+
+### Infrastructure
+- **AWS CDK** for infrastructure as code
+- **ClickHouse Cloud** for managed analytics database
+- **AWS Lambda** for serverless compute
+- **AWS S3** for data lake storage
+- **AWS Step Functions** for workflow orchestration
+
+## 🚀 Performance Achievements
+
+- ✅ **10x throughput improvement** - Parallel processing at tenant, table, and chunk levels
+- ✅ **95% reduction in Lambda timeouts** - Intelligent chunking and resumable processing
+- ✅ **5x improvement in API efficiency** - Concurrent API calls and optimized pagination
+- ✅ **Real-time progress visibility** - Comprehensive CloudWatch dashboards and metrics
+- ✅ **Zero-downtime migration** - Successfully migrated from legacy sequential processing
+
+## 📁 Project Structure
+
+```
+avesa/
+├── README.md                           # This file - main project documentation
+├── requirements.txt                    # Python dependencies
+├── .gitignore                         # Git ignore rules
+│
+├── frontend/                          # 🎨 React TypeScript Frontend
+│   ├── src/
+│   │   ├── components/               # Reusable UI components
+│   │   ├── contexts/                 # React contexts (Auth, etc.)
+│   │   ├── pages/                    # Page components
+│   │   ├── services/                 # API client services
+│   │   └── types/                    # TypeScript definitions
+│   ├── public/                       # Static assets
+│   └── package.json
+│
+├── infrastructure/                    # 🏗️ AWS CDK Infrastructure
+│   ├── app.py                        # ⭐ Main CDK application
+│   ├── cdk.json                      # CDK configuration
+│   ├── environment_config.json       # Environment configuration
+│   ├── requirements.txt              # CDK dependencies
+│   └── stacks/                       # CDK stack definitions
+│       ├── __init__.py
+│       ├── backfill_stack.py        # Backfill infrastructure
+│       ├── clickhouse_stack.py      # ClickHouse infrastructure
+│       ├── performance_optimization_stack.py # ⭐ Optimized architecture
+│       └── archive/                  # Archived stack definitions
+│
+├── src/                              # 🔧 Lambda Function Source Code
+│   ├── optimized/                    # ⭐ Optimized Architecture (ACTIVE)
+│   │   ├── __init__.py
+│   │   ├── orchestrator/             # Pipeline orchestration
+│   │   │   ├── lambda_function.py    # Main orchestrator
+│   │   │   └── requirements.txt
+│   │   ├── processors/               # Processing components
+│   │   │   ├── tenant_processor.py   # Tenant-level processing
+│   │   │   ├── table_processor.py    # Table-level processing
+│   │   │   └── chunk_processor.py    # Chunk-level processing
+│   │   ├── state_machines/           # Step Functions definitions
+│   │   │   ├── pipeline_orchestrator.json
+│   │   │   ├── tenant_processor.json
+│   │   │   └── table_processor.json
+│   │   ├── monitoring/               # Monitoring and metrics
+│   │   │   ├── metrics.py
+│   │   │   └── dashboards.py
+│   │   └── helpers/                  # Utility functions
+│   │       ├── completion_notifier.py
+│   │       ├── error_handler.py
+│   │       └── result_aggregator.py
+│   ├── clickhouse/                   # 🗄️ ClickHouse Integration
+│   │   ├── api/                      # Node.js API server
+│   │   │   ├── routes/               # API route handlers
+│   │   │   ├── middleware/           # Express middleware
+│   │   │   ├── config/               # Configuration files
+│   │   │   └── utils/                # Utility functions
+│   │   ├── data_loader/              # Data loading lambdas
+│   │   ├── scd_processor/            # SCD processing
+│   │   └── schemas/                  # Database schemas
+│   ├── canonical_transform/          # Canonical data transformation
+│   │   ├── lambda_function.py
+│   │   └── requirements.txt
+│   ├── backfill/                     # Historical data processing
+│   │   ├── lambda_function.py
+│   │   └── requirements.txt
+│   └── shared/                       # Shared utilities
+│       ├── __init__.py
+│       ├── aws_clients.py
+│       ├── config_simple.py
+│       ├── logger.py
+│       └── utils.py
+│
+├── scripts/                          # 🚀 Deployment and Management Scripts
+│   ├── README.md                     # Scripts documentation
+│   ├── deploy.sh                     # ⭐ Primary deployment script
+│   ├── start-development-environment.sh # Full-stack dev environment
+│   ├── package-lightweight-lambdas.py # Lambda packaging
+│   ├── setup-service.py              # Tenant service configuration
+│   ├── trigger-backfill.py           # Backfill operations
+│   └── test-*.py                     # Various test scripts
+│
+├── mappings/                         # 📋 Configuration Files
+│   ├── canonical/                    # Canonical transformation mappings
+│   │   ├── companies.json
+│   │   ├── contacts.json
+│   │   ├── tickets.json
+│   │   └── time_entries.json
+│   ├── integrations/                 # Integration service configurations
+│   │   ├── connectwise_endpoints.json
+│   │   ├── servicenow_endpoints.json
+│   │   └── salesforce_endpoints.json
+│   ├── services/                     # Service-specific mappings
+│   │   ├── connectwise.json
+│   │   ├── salesforce.json
+│   │   └── servicenow.json
+│   └── backfill_config.json          # Backfill configuration
+│
+├── docs/                             # 📚 Documentation
+│   ├── DEPLOYMENT_GUIDE.md           # Comprehensive deployment guide
+│   ├── PERFORMANCE_OPTIMIZATION_ARCHITECTURE.md # Architecture details
+│   ├── AWS_CREDENTIALS_GUIDE.md      # AWS credentials setup
+│   ├── CLICKHOUSE_GUIDE.md           # ClickHouse implementation guide
+│   ├── GITHUB_SECRETS_QUICK_SETUP.md # GitHub Actions setup
+│   ├── PERFORMANCE_MONITORING_STRATEGY.md # Monitoring setup
+│   ├── BACKFILL_STRATEGY.md          # Data backfill procedures
+│   └── README.md                     # Documentation index
+│
+└── tests/                            # 🧪 Test Suite
+    ├── __init__.py
+    └── test_shared_utils.py
+```
+
 ## Integration Services
 
 The pipeline supports multiple integration services, each with dedicated processing:
@@ -94,173 +330,62 @@ Each integration service handles:
 - 10-20 different endpoints/tables per service
 - Service-specific error handling and retry logic
 
-## Project Structure
+## 🎯 Features
 
+### Authentication & Security
+- Multi-tenant JWT authentication
+- Role-based access control
+- Tenant data isolation
+- Secure API endpoints
+
+### Dashboard & Analytics
+- Real-time analytics dashboard
+- Interactive charts and visualizations
+- Key performance indicators (KPIs)
+- Customizable time periods
+
+### Data Management
+- Companies management
+- Contacts management
+- Support tickets tracking
+- Time entries logging
+
+### Multi-Tenancy
+- Complete tenant isolation
+- Tenant-specific branding
+- Scalable architecture
+- Secure data access
+
+## 🔌 API Endpoints
+
+### Authentication
 ```
-avesa/
-├── README.md                           # This file - main project documentation
-├── requirements.txt                    # Python dependencies
-├── payload-dev.json                    # Development test payload
-├── .gitignore                         # Git ignore rules
-│
-├── infrastructure/                     # 🏗️ AWS CDK Infrastructure
-│   ├── app.py                         # ⭐ Main CDK application
-│   ├── cdk.json                       # CDK configuration
-│   ├── requirements.txt               # CDK dependencies
-│   └── stacks/                        # CDK stack definitions
-│       ├── __init__.py
-│       ├── data_pipeline_stack.py     # Core pipeline infrastructure
-│       ├── monitoring_stack.py        # Monitoring and alerting
-│       ├── backfill_stack.py         # Backfill infrastructure
-│       ├── cross_account_monitoring.py # Cross-account monitoring
-│       └── performance_optimization_stack.py # ⭐ Optimized architecture
-│
-├── src/                               # 🔧 Lambda Function Source Code
-│   ├── optimized/                     # ⭐ Optimized Architecture (ACTIVE)
-│   │   ├── __init__.py
-│   │   ├── orchestrator/              # Pipeline orchestration
-│   │   │   ├── lambda_function.py     # Main orchestrator
-│   │   │   └── requirements.txt
-│   │   ├── processors/                # Processing components
-│   │   │   ├── tenant_processor.py    # Tenant-level processing
-│   │   │   ├── table_processor.py     # Table-level processing
-│   │   │   └── chunk_processor.py     # Chunk-level processing
-│   │   ├── state_machines/            # Step Functions definitions
-│   │   │   ├── pipeline_orchestrator.json
-│   │   │   ├── tenant_processor.json
-│   │   │   └── table_processor.json
-│   │   ├── monitoring/                # Monitoring and metrics
-│   │   │   ├── metrics.py
-│   │   │   └── dashboards.py
-│   │   └── helpers/                   # Utility functions
-│   │       ├── completion_notifier.py
-│   │       ├── error_handler.py
-│   │       └── result_aggregator.py
-│   ├── canonical_transform/           # Canonical data transformation
-│   │   ├── lambda_function.py
-│   │   └── requirements.txt
-│   └── shared/                        # Shared utilities
-│       ├── __init__.py
-│       ├── aws_clients.py
-│       ├── config_simple.py
-│       ├── logger.py
-│       └── utils.py
-│
-├── scripts/                           # 🚀 Deployment and Management Scripts
-│   ├── README.md                      # Scripts documentation
-│   ├── deploy.sh                     # ⭐ Primary deployment script
-│   ├── package-lightweight-lambdas.py # Lambda packaging
-│   ├── setup-service.py              # Tenant service configuration
-│   ├── trigger-backfill.py           # Backfill operations
-│   ├── cleanup-stuck-jobs.py         # Maintenance utilities
-│   ├── test-end-to-end-pipeline.py   # End-to-end testing
-│   ├── test-lambda-functions.py      # Function testing
-│   └── test-*.py                     # Various test scripts
-│
-├── mappings/                          # 📋 Configuration Files
-│   ├── canonical/                     # Canonical transformation mappings
-│   │   ├── companies.json
-│   │   ├── contacts.json
-│   │   ├── tickets.json
-│   │   └── time_entries.json
-│   ├── integrations/                  # Integration service configurations
-│   │   ├── connectwise_endpoints.json
-│   │   ├── servicenow_endpoints.json
-│   │   └── salesforce_endpoints.json
-│   ├── services/                      # Service-specific mappings
-│   │   ├── connectwise.json
-│   │   ├── salesforce.json
-│   │   └── servicenow.json
-│   └── backfill_config.json          # Backfill configuration
-│
-├── lambda-packages/                   # 📦 Packaged Lambda Functions
-│   ├── canonical-transform.zip
-│   ├── connectwise-ingestion.zip
-│   ├── optimized-orchestrator.zip    # ⭐ Optimized components
-│   └── optimized-processors.zip      # ⭐ Optimized components
-│
-├── docs/                             # 📚 Documentation
-│   ├── DEPLOYMENT_GUIDE.md           # Comprehensive deployment guide
-│   ├── PERFORMANCE_OPTIMIZATION_ARCHITECTURE.md # Architecture details
-│   ├── AWS_CREDENTIALS_GUIDE.md      # AWS credentials setup
-│   ├── CLICKHOUSE_GUIDE.md           # ClickHouse implementation guide
-│   ├── GITHUB_SECRETS_QUICK_SETUP.md # GitHub Actions setup
-│   ├── PERFORMANCE_MONITORING_STRATEGY.md # Monitoring setup
-│   ├── BACKFILL_STRATEGY.md          # Data backfill procedures
-│   └── *.md                         # Additional operational documentation
-│
-└── tests/                            # 🧪 Test Suite
-    ├── __init__.py
-    └── test_shared_utils.py
+POST /auth/login          # User login
+POST /auth/logout         # User logout
+POST /auth/refresh        # Token refresh
+GET  /auth/me            # Current user info
 ```
 
-## Quick Start
-
-### Prerequisites
-
-- **AWS CLI** configured with appropriate permissions
-- **Python 3.9+** with pip
-- **Node.js 18+** (for AWS CDK)
-- **AWS CDK CLI** installed: `npm install -g aws-cdk`
-
-### 1. Clone and Setup
-
-```bash
-git clone <repository-url>
-cd avesa
-pip install -r requirements.txt
+### Analytics
+```
+GET /api/analytics/dashboard           # Dashboard summary
+GET /api/analytics/tickets/status     # Ticket status distribution
+GET /api/analytics/companies/top      # Top companies by metrics
 ```
 
-### 2. Deploy Infrastructure
-
-#### Development Environment
-```bash
-./scripts/deploy.sh --environment dev
+### Data Entities
+```
+GET /api/companies        # List companies
+GET /api/companies/:id    # Get company details
+GET /api/contacts         # List contacts
+GET /api/tickets          # List tickets
+GET /api/time-entries     # List time entries
 ```
 
-#### Staging Environment
-```bash
-./scripts/deploy.sh --environment staging
+### Health & Monitoring
 ```
-
-#### Production Environment
-```bash
-./scripts/deploy.sh --environment prod
-```
-
-### 3. Configure Tenant Services
-
-Add ConnectWise service for a tenant:
-
-```bash
-python scripts/setup-service.py \
-  --tenant-id "example-tenant" \
-  --company-name "Example Company" \
-  --service connectwise \
-  --environment dev
-```
-
-The script will prompt for ConnectWise credentials or you can provide them via environment variables:
-
-```bash
-export CONNECTWISE_API_URL="https://api-na.myconnectwise.net"
-export CONNECTWISE_COMPANY_ID="YourCompanyID"
-export CONNECTWISE_PUBLIC_KEY="your-public-key"
-export CONNECTWISE_PRIVATE_KEY="your-private-key"
-export CONNECTWISE_CLIENT_ID="your-client-id"
-```
-
-### 4. Test the Pipeline
-
-```bash
-# Test optimized pipeline
-python scripts/test-end-to-end-pipeline.py --environment dev --region us-east-2
-
-# Test specific Lambda function
-aws lambda invoke \
-  --function-name avesa-pipeline-orchestrator-dev \
-  --payload '{"tenant_id": "example-tenant"}' \
-  response.json
+GET /health              # Basic health check
+GET /health/detailed     # Detailed health with DB status
 ```
 
 ## Data Flow
@@ -279,6 +404,8 @@ EventBridge Schedule → Pipeline Orchestrator (Step Functions)
                    Intelligent Chunked Processing (Lambda)
                     ↓
                    S3 Raw Data Storage → Canonical Transform → S3 Canonical Data
+                    ↓
+                   ClickHouse Analytics Database ← Node.js API ← React Frontend
 ```
 
 ### Storage Structure
@@ -326,76 +453,99 @@ s3://{bucket}/{tenant_id}/canonical/{canonical_table}/{timestamp}.parquet
 - **CloudWatch Alarms**: Error rates, performance degradation, timeouts
 - **Real-time Monitoring**: Step Functions execution tracking
 
-## Documentation Index
+## 🛠️ Development
 
-### Setup and Deployment
-- [**Deployment Guide**](docs/DEPLOYMENT_GUIDE.md) - Complete deployment procedures for all environments
-- [**AWS Credentials Setup**](docs/AWS_CREDENTIALS_GUIDE.md) - AWS credentials configuration and troubleshooting
-- [**ClickHouse Guide**](docs/CLICKHOUSE_GUIDE.md) - ClickHouse implementation and deployment
-- [**GitHub Secrets Setup**](docs/GITHUB_SECRETS_QUICK_SETUP.md) - GitHub Actions configuration
+### Running Individual Services
 
-### Architecture and Implementation
-- [**Performance Optimization Architecture**](docs/PERFORMANCE_OPTIMIZATION_ARCHITECTURE.md) - Detailed architecture documentation
-- [**Step Functions Workflow Design**](docs/STEP_FUNCTIONS_WORKFLOW_DESIGN.md) - Workflow architecture
+**API Server Only:**
+```bash
+cd src/clickhouse/api
+npm install
+npm start
+```
 
-### Operations and Monitoring
-- [**Performance Monitoring Strategy**](docs/PERFORMANCE_MONITORING_STRATEGY.md) - Monitoring setup and best practices
-- [**Deployment Verification**](docs/DEPLOYMENT_VERIFICATION.md) - Post-deployment validation
-- [**Backfill Strategy**](docs/BACKFILL_STRATEGY.md) - Data backfill procedures
+**Frontend Only:**
+```bash
+cd frontend
+npm install
+npm start
+```
 
-### Scripts and Tools
-- [**Scripts Documentation**](scripts/README.md) - Complete scripts reference
-- [**Production Environment Setup**](docs/PROD_ENVIRONMENT_SETUP_GUIDE.md) - Production configuration
+### Environment Variables
 
-## Development Workflow
+**API Server (.env in src/clickhouse/api/):**
+```bash
+NODE_ENV=development
+PORT=3001
+JWT_SECRET=your-secret-key
+LOG_LEVEL=info
+CLICKHOUSE_SECRET_NAME=your-clickhouse-secret
+AWS_REGION=us-east-2
+```
 
-### Contributing to the Project
+**Frontend (.env in frontend/):**
+```bash
+REACT_APP_API_URL=http://localhost:3001
+```
 
-1. **Development Setup**
-   ```bash
-   # Clone repository
-   git clone <repository-url>
-   cd avesa
-   
-   # Install dependencies
-   pip install -r requirements.txt
-   
-   # Deploy to development environment
-   ./scripts/deploy.sh --environment dev
-   ```
+### Testing
 
-2. **Making Changes**
-   - Work with optimized architecture components in [`src/optimized/`](src/optimized/)
-   - Use [`scripts/deploy.sh`](scripts/deploy.sh) for deployments
-   - Reference [`infrastructure/app.py`](infrastructure/app.py) for infrastructure changes
+**API Tests:**
+```bash
+cd src/clickhouse/api
+npm test
+```
 
-3. **Testing**
-   ```bash
-   # Run unit tests
-   python -m pytest tests/
-   
-   # Test end-to-end pipeline
-   python scripts/test-end-to-end-pipeline.py --environment dev
-   
-   # Test specific components
-   python scripts/test-lambda-functions.py --environment dev
-   ```
+**Frontend Tests:**
+```bash
+cd frontend
+npm test
+```
 
-4. **Deployment Process**
-   ```bash
-   # Deploy to staging for validation
-   ./scripts/deploy.sh --environment staging
+**Pipeline Tests:**
+```bash
+# Run unit tests
+python -m pytest tests/
 
-   # Deploy to production (requires production AWS profile)
-   ./scripts/deploy.sh --environment prod
-   ```
+# Test end-to-end pipeline
+python scripts/test-end-to-end-pipeline.py --environment dev
 
-### Code Organization
+# Test specific components
+python scripts/test-lambda-functions.py --environment dev
+```
 
-- **Active Development**: Use components in [`src/optimized/`](src/optimized/) directory
-- **Infrastructure**: Modify [`infrastructure/app.py`](infrastructure/app.py) and related stacks
-- **Scripts**: Add new scripts to [`scripts/`](scripts/) directory following naming conventions
-- **Documentation**: Update relevant documentation in [`docs/`](docs/) directory
+## 🚀 Deployment
+
+### Production Build
+
+**Frontend:**
+```bash
+cd frontend
+npm run build
+```
+
+**API Server:**
+```bash
+cd src/clickhouse/api
+npm install --production
+```
+
+### Infrastructure Deployment
+
+```bash
+cd infrastructure
+npm install
+cdk deploy --all
+```
+
+### Deployment Process
+```bash
+# Deploy to staging for validation
+./scripts/deploy.sh --environment staging
+
+# Deploy to production (requires production AWS profile)
+./scripts/deploy.sh --environment prod
+```
 
 ## Key Features
 
@@ -429,14 +579,74 @@ s3://{bucket}/{tenant_id}/canonical/{canonical_table}/{timestamp}.parquet
 - **Validation and reconciliation**: Data quality assurance
 - **Incremental processing**: Efficient data updates
 
-## Support and Maintenance
+## 📚 Documentation Index
+
+### Setup and Deployment
+- [**Deployment Guide**](docs/DEPLOYMENT_GUIDE.md) - Complete deployment procedures for all environments
+- [**AWS Credentials Setup**](docs/AWS_CREDENTIALS_GUIDE.md) - AWS credentials configuration and troubleshooting
+- [**ClickHouse Guide**](docs/CLICKHOUSE_GUIDE.md) - ClickHouse implementation and deployment
+- [**GitHub Secrets Setup**](docs/GITHUB_SECRETS_QUICK_SETUP.md) - GitHub Actions configuration
+
+### Architecture and Implementation
+- [**Performance Optimization Architecture**](docs/PERFORMANCE_OPTIMIZATION_ARCHITECTURE.md) - Detailed architecture documentation
+- [**Step Functions Workflow Design**](docs/STEP_FUNCTIONS_WORKFLOW_DESIGN.md) - Workflow architecture
+- [**SaaS Architecture Review**](docs/SAAS_ARCHITECTURE_REVIEW.md) - Complete SaaS architecture analysis
+
+### Operations and Monitoring
+- [**Performance Monitoring Strategy**](docs/PERFORMANCE_MONITORING_STRATEGY.md) - Monitoring setup and best practices
+- [**Backfill Strategy**](docs/BACKFILL_STRATEGY.md) - Data backfill procedures
+- [**Security Implementation Guide**](docs/SECURITY_IMPLEMENTATION_GUIDE.md) - Security guidelines
+
+### Scripts and Tools
+- [**Scripts Documentation**](scripts/README.md) - Complete scripts reference
+- [**Production Environment Setup**](docs/PROD_ENVIRONMENT_SETUP_GUIDE.md) - Production configuration
+
+### Complete Documentation
+- [**Documentation Index**](docs/README.md) - Comprehensive documentation catalog
+
+## 🔒 Security Features
+
+- **JWT Authentication**: Secure token-based authentication
+- **Tenant Isolation**: Complete data separation between tenants
+- **Role-Based Access**: Granular permissions system
+- **Input Validation**: Comprehensive request validation
+- **Rate Limiting**: API rate limiting for protection
+- **CORS Protection**: Configurable CORS policies
+
+## 📈 Monitoring & Logging
+
+- **Structured Logging**: Winston-based logging with multiple transports
+- **Health Checks**: Comprehensive health monitoring
+- **Error Handling**: Centralized error handling and reporting
+- **Performance Metrics**: Built-in performance monitoring
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+**Frontend won't start:**
+- Check Node.js version (18+ required)
+- Clear node_modules and reinstall
+- Check for port conflicts
+
+**API connection errors:**
+- Verify API server is running on port 3001
+- Check CORS configuration
+- Verify JWT secret is set
+
+**Authentication issues:**
+- Check demo credentials are correct
+- Verify JWT secret matches between frontend and backend
+- Check token expiration
 
 ### Getting Help
 
-1. **Documentation**: Check the comprehensive documentation in [`docs/`](docs/)
-2. **Scripts Reference**: Review [`scripts/README.md`](scripts/README.md) for operational procedures
-3. **Architecture Details**: Reference [`docs/PERFORMANCE_OPTIMIZATION_ARCHITECTURE.md`](docs/PERFORMANCE_OPTIMIZATION_ARCHITECTURE.md)
-4. **Troubleshooting**: Check deployment and monitoring guides
+1. Check the comprehensive documentation in [`docs/`](docs/)
+2. Review [`scripts/README.md`](scripts/README.md) for operational procedures
+3. Reference [`docs/PERFORMANCE_OPTIMIZATION_ARCHITECTURE.md`](docs/PERFORMANCE_OPTIMIZATION_ARCHITECTURE.md)
+4. Check deployment and monitoring guides
+
+## Support and Maintenance
 
 ### Maintenance Tasks
 
@@ -446,11 +656,19 @@ s3://{bucket}/{tenant_id}/canonical/{canonical_table}/{timestamp}.parquet
 - **Regularly review and update** chunk sizing algorithms
 - **Monitor costs** and optimize resource usage
 
-### Contact Information
+## 🤝 Contributing
 
-- **Architecture Questions**: Reference architecture documentation
-- **Implementation Details**: Check implementation guides
-- **Operational Issues**: Review monitoring and troubleshooting guides
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Submit a pull request
+
+### Code Style
+- Use TypeScript for all new code
+- Follow existing naming conventions
+- Add JSDoc comments for functions
+- Use Prettier for code formatting
 
 ---
 
@@ -469,3 +687,5 @@ The AVESA multi-tenant data pipeline has been successfully upgraded to the optim
 - ✅ **Production-ready architecture** supporting 500+ tenants with enhanced scalability
 
 **🚀 Ready for Scale**: The optimized foundation supports future enhancements and enterprise-scale operations.
+
+**Built with ❤️ by the AVESA Team**

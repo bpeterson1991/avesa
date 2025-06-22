@@ -7,22 +7,31 @@ when tenants connect new services.
 """
 
 import json
-import boto3
 import os
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 import logging
 import time
 
+# Import shared components
+from shared import AWSClientFactory, validate_connectwise_credentials
+from shared.environment import Environment
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Initialize AWS clients
-dynamodb = boto3.resource('dynamodb')
-s3_client = boto3.client('s3')
-secrets_client = boto3.client('secretsmanager')
-lambda_client = boto3.client('lambda')
+# Get environment configuration using proper pattern
+env_name = os.environ.get('ENVIRONMENT', 'dev')
+config = Environment.get_config(env_name)
+
+# Initialize AWS clients using shared factory
+factory = AWSClientFactory()
+clients = factory.get_client_bundle(['dynamodb', 's3', 'secretsmanager', 'lambda'])
+dynamodb = clients['dynamodb']
+s3_client = clients['s3']
+secrets_client = clients['secretsmanager']
+lambda_client = clients['lambda']
 
 # Environment variables
 BUCKET_NAME = os.environ.get('BUCKET_NAME')
@@ -260,24 +269,7 @@ def get_service_credentials(service_config: Dict[str, Any], service: str) -> Opt
         return None
 
 
-def validate_connectwise_credentials(credentials: Dict[str, Any]) -> bool:
-    """
-    Validate ConnectWise credentials have required fields.
-    
-    Args:
-        credentials: Credentials dictionary
-        
-    Returns:
-        True if valid, False otherwise
-    """
-    required_fields = ['company_id', 'public_key', 'private_key', 'client_id']
-    
-    for field in required_fields:
-        if not credentials.get(field):
-            logger.error(f"Missing required credential field: {field}")
-            return False
-    
-    return True
+# validate_connectwise_credentials is now imported from shared module
 
 
 def get_default_tables_for_service(service: str) -> List[str]:

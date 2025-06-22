@@ -16,9 +16,18 @@ import sys
 import json
 import boto3
 import clickhouse_connect
-import argparse
 from datetime import datetime
 from typing import Dict, List, Any, Optional
+
+# Setup paths using shared utilities
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+from shared.path_utils import PathManager
+PathManager.setup_src_path(__file__)
+
+# Import shared argument parser and AWS setup
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'shared'))
+from arg_parser import StandardArgumentParser
+from aws_setup import AWSEnvironmentSetup
 
 class SCDViolationCleanup:
     def __init__(self, use_aws_secrets=True, dry_run=True):
@@ -379,22 +388,16 @@ class SCDViolationCleanup:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Cleanup SCD Type 2 Violations in ClickHouse time_entries')
-    parser.add_argument('--execute', action='store_true',
-                       help='Execute actual cleanup (default is dry run)')
-    parser.add_argument('--credentials', choices=['aws', 'env'], default='aws',
-                       help='Credential source (default: aws)')
-    parser.add_argument('--save-report', action='store_true',
-                       help='Save detailed report to JSON file')
+    parser = StandardArgumentParser.create_cleanup_parser(
+        'Cleanup SCD Type 2 Violations in ClickHouse time_entries'
+    )
     
     args = parser.parse_args()
     
     # Set AWS environment if using AWS secrets
     use_aws_secrets = args.credentials == 'aws'
     if use_aws_secrets:
-        os.environ['AWS_SDK_LOAD_CONFIG'] = '1'
-        if not os.environ.get('AWS_PROFILE'):
-            os.environ['AWS_PROFILE'] = 'AdministratorAccess-123938354448'
+        AWSEnvironmentSetup.setup_script_environment(__file__)
     
     # Confirm execution if not dry run
     if args.execute:
