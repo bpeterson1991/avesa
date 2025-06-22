@@ -189,6 +189,16 @@ def process_tenant_canonical_data(
                 'message': 'No raw data to transform'
             }
         
+        # Check if these files have already been processed (idempotency)
+        if check_if_files_already_processed(config, tenant_id, canonical_table, raw_files, logger):
+            return {
+                'tenant_id': tenant_id,
+                'canonical_table': canonical_table,
+                'status': 'already_processed',
+                'record_count': 0,
+                'message': 'All raw files already processed - skipping to prevent duplicates'
+            }
+        
         # Load and transform data
         transformed_records = []
         for raw_file in raw_files:
@@ -214,6 +224,9 @@ def process_tenant_canonical_data(
         
         write_canonical_data_to_s3(config, s3_key, scd_records, logger)
         
+        # Update processing timestamp for idempotency
+        update_processing_timestamp(config, tenant_id, canonical_table, logger)
+        
         execution_time = (datetime.now() - start_time).total_seconds()
         
         logger.log_data_processing(
@@ -236,6 +249,72 @@ def process_tenant_canonical_data(
         logger.error(f"Failed to process canonical transformation: {str(e)}", execution_time=execution_time)
         raise
 
+
+def check_if_files_already_processed(config: Config, tenant_id: str, canonical_table: str, raw_files: List[str], logger: PipelineLogger) -> bool:
+    """Check if the current batch of raw files has already been processed."""
+    if not raw_files:
+        return True
+    
+    try:
+        # Get the last processed timestamp for this tenant/table
+        response = dynamodb.get_item(
+            TableName=config.last_updated_table,
+            Key={
+                'tenant_id': {'S': tenant_id},
+                'table_name': {'S': f"canonical_{canonical_table}"}
+            }
+        )
+        
+        if 'Item' not in response:
+            return False  # Never processed before
+        
+        last_processed = response['Item'].get('last_updated', {}).get('S')
+        if not last_processed:
+            return False
+        
+        # Parse last processed timestamp
+        last_processed_dt = datetime.fromisoformat(last_processed.replace('Z', '+00:00'))
+        
+        # Check if any raw files are newer than last processed timestamp
+        for file_key in raw_files:
+            try:
+                # Get file metadata
+                file_response = s3.head_object(Bucket=config.bucket_name, Key=file_key)
+                file_modified = file_response['LastModified']
+                
+                if file_modified > last_processed_dt:
+                    logger.info(f"Found newer raw file: {file_key} modified {file_modified}")
+                    return False  # Found newer data
+            except Exception as e:
+                logger.warning(f"Could not check file {file_key}: {e}")
+                return False  # Assume not processed on error
+        
+        logger.info(f"All raw files for {tenant_id}/{canonical_table} already processed")
+        return True  # All files already processed
+        
+    except Exception as e:
+        logger.error(f"Error checking processing status: {e}")
+        return False  # Assume not processed on error
+
+def update_processing_timestamp(config: Config, tenant_id: str, canonical_table: str, logger: PipelineLogger):
+    """Update the last processed timestamp after successful transformation."""
+    try:
+        current_timestamp = datetime.now(timezone.utc).isoformat()
+        
+        dynamodb.put_item(
+            TableName=config.last_updated_table,
+            Item={
+                'tenant_id': {'S': tenant_id},
+                'table_name': {'S': f"canonical_{canonical_table}"},
+                'last_updated': {'S': current_timestamp},
+                'updated_at': {'S': current_timestamp}
+            }
+        )
+        
+        logger.info(f"Updated processing timestamp for {tenant_id}/canonical_{canonical_table}: {current_timestamp}")
+        
+    except Exception as e:
+        logger.error(f"Failed to update processing timestamp: {e}")
 
 def find_raw_data_files(config: Config, tenant_id: str, canonical_table: str, logger: PipelineLogger) -> List[str]:
     """Find raw data files that need to be transformed."""
