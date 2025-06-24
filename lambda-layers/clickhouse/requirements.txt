@@ -1,0 +1,6 @@
+clickhouse-connect==0.8.17
+zstandard==0.23.0
+lz4==4.4.4
+certifi>=2023.7.22
+urllib3>=1.26.0
+pytz>=2023.3

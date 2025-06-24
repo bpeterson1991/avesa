@@ -84,132 +84,60 @@ class PerformanceOptimizationStack(Stack):
         self._create_scheduled_rules()
 
     def _create_data_bucket(self) -> s3.Bucket:
-        """Create S3 bucket for data storage."""
-        bucket = s3.Bucket(
+        """Import existing S3 bucket for data storage."""
+        # Import existing bucket - CDK will handle gracefully if it doesn't exist during deployment
+        bucket = s3.Bucket.from_bucket_name(
             self,
             "DataBucket",
-            bucket_name=self.data_bucket_name,
-            versioned=True,
-            encryption=s3.BucketEncryption.S3_MANAGED,
-            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
-            removal_policy=RemovalPolicy.RETAIN,  # Keep data safe in production
-            lifecycle_rules=[
-                s3.LifecycleRule(
-                    id="DeleteIncompleteMultipartUploads",
-                    abort_incomplete_multipart_upload_after=Duration.days(7)
-                )
-            ]
+            bucket_name=self.data_bucket_name
         )
         return bucket
 
     def _create_processing_jobs_table(self) -> dynamodb.Table:
-        """Create DynamoDB table for tracking processing jobs."""
+        """Import existing DynamoDB table for tracking processing jobs."""
         table_name = f"ProcessingJobs-{self.env_name}"
         
-        table = dynamodb.Table(
+        # Import existing table
+        table = dynamodb.Table.from_table_name(
             self,
             "ProcessingJobsTable",
-            table_name=table_name,
-            partition_key=dynamodb.Attribute(
-                name="job_id",
-                type=dynamodb.AttributeType.STRING
-            ),
-            sort_key=dynamodb.Attribute(
-                name="tenant_id",
-                type=dynamodb.AttributeType.STRING
-            ),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.RETAIN,
-            point_in_time_recovery=True
+            table_name=table_name
         )
         return table
 
     def _create_chunk_progress_table(self) -> dynamodb.Table:
-        """Create DynamoDB table for tracking chunk processing progress."""
+        """Import existing DynamoDB table for tracking chunk processing progress."""
         table_name = f"ChunkProgress-{self.env_name}"
         
-        table = dynamodb.Table(
+        # Import existing table
+        table = dynamodb.Table.from_table_name(
             self,
             "ChunkProgressTable",
-            table_name=table_name,
-            partition_key=dynamodb.Attribute(
-                name="job_id",
-                type=dynamodb.AttributeType.STRING
-            ),
-            sort_key=dynamodb.Attribute(
-                name="chunk_id",
-                type=dynamodb.AttributeType.STRING
-            ),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.RETAIN,
-            point_in_time_recovery=True
+            table_name=table_name
         )
         return table
 
     def _create_tenant_services_table(self) -> dynamodb.Table:
-        """
-        Create DynamoDB table for tenant service configuration.
-        
-        Complete Schema:
-        - Partition Key: tenant_id (STRING) - Identifies the tenant organization
-        - Sort Key: service (STRING) - Identifies the specific service (e.g., 'connectwise', 'servicenow')
-        - Additional Attributes:
-          * enabled (BOOLEAN) - Whether the service is enabled for this tenant
-          * secret_name (STRING) - AWS Secrets Manager secret name for service credentials
-          * updated_at (STRING) - ISO timestamp of last configuration update
-          * created_at (STRING) - ISO timestamp of initial configuration creation
-        
-        This table stores complete configuration for which services are enabled for each tenant,
-        including service status, credential references, and audit timestamps.
-        """
+        """Import existing DynamoDB table for tenant service configuration."""
         table_name = self.tenant_services_table_name
         
-        table = dynamodb.Table(
+        # Import existing table
+        table = dynamodb.Table.from_table_name(
             self,
             "TenantServicesTable",
-            table_name=table_name,
-            partition_key=dynamodb.Attribute(
-                name="tenant_id",
-                type=dynamodb.AttributeType.STRING
-            ),
-            sort_key=dynamodb.Attribute(
-                name="service",
-                type=dynamodb.AttributeType.STRING
-            ),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.RETAIN,  # Keep data safe in production
-            point_in_time_recovery=True
+            table_name=table_name
         )
         return table
 
     def _create_last_updated_table(self) -> dynamodb.Table:
-        """
-        Create DynamoDB table for tracking last updated timestamps.
-        
-        Schema:
-        - Partition Key: tenant_id (STRING) - Identifies the tenant
-        - Sort Key: table_name (STRING) - Identifies the specific table/endpoint
-        
-        This table tracks incremental sync timestamps for each tenant/table combination
-        to enable efficient incremental data processing.
-        """
+        """Import existing DynamoDB table for tracking last updated timestamps."""
         table_name = self.last_updated_table_name
         
-        table = dynamodb.Table(
+        # Import existing table
+        table = dynamodb.Table.from_table_name(
             self,
             "LastUpdatedTable",
-            table_name=table_name,
-            partition_key=dynamodb.Attribute(
-                name="tenant_id",
-                type=dynamodb.AttributeType.STRING
-            ),
-            sort_key=dynamodb.Attribute(
-                name="table_name",
-                type=dynamodb.AttributeType.STRING
-            ),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.RETAIN,  # Keep data safe in production
-            point_in_time_recovery=True
+            table_name=table_name
         )
         return table
 
@@ -300,7 +228,8 @@ class PerformanceOptimizationStack(Stack):
                         "lambda:InvokeFunction"
                     ],
                     resources=[
-                        f"arn:aws:lambda:{self.region}:{self.account}:function:avesa-*-{self.env_name}"
+                        f"arn:aws:lambda:{self.region}:{self.account}:function:avesa-*-{self.env_name}",
+                        f"arn:aws:lambda:{self.region}:{self.account}:function:clickhouse-*-{self.env_name}"
                     ]
                 )
             ]
@@ -389,9 +318,8 @@ class PerformanceOptimizationStack(Stack):
         # Create state machines first so we can reference them
         state_machines = self._create_state_machines_early()
         
-        # Use optimized bundling that includes the shared directory
-        # This eliminates file duplication while maintaining functionality
-        from infrastructure.shared.bundling_utils import BundlingOptionsFactory
+        # EMERGENCY FIX: Use simple asset packaging to avoid import issues
+        # from infrastructure.shared.bundling_utils import BundlingOptionsFactory
 
         # Pipeline Orchestrator with STATE_MACHINE_ARN
         orchestrator_env = common_env.copy()
@@ -403,10 +331,7 @@ class PerformanceOptimizationStack(Stack):
             function_name=f"avesa-pipeline-orchestrator-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="lambda_function.lambda_handler",
-            code=_lambda.Code.from_asset(
-                "../src/optimized/orchestrator",
-                bundling=BundlingOptionsFactory.get_optimized_shared_bundling()
-            ),
+            code=_lambda.Code.from_asset("../src/optimized/orchestrator"),
             role=self.lambda_execution_role,
             memory_size=512,
             timeout=Duration.seconds(300),
@@ -421,10 +346,7 @@ class PerformanceOptimizationStack(Stack):
             function_name=f"avesa-tenant-processor-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="tenant_processor.lambda_handler",
-            code=_lambda.Code.from_asset(
-                "../src/optimized/processors",
-                bundling=BundlingOptionsFactory.get_optimized_shared_bundling()
-            ),
+            code=_lambda.Code.from_asset("../src/optimized/processors"),
             role=self.lambda_execution_role,
             memory_size=512,
             timeout=Duration.seconds(300),
@@ -439,10 +361,7 @@ class PerformanceOptimizationStack(Stack):
             function_name=f"avesa-table-processor-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="table_processor.lambda_handler",
-            code=_lambda.Code.from_asset(
-                "../src/optimized/processors",
-                bundling=BundlingOptionsFactory.get_optimized_shared_bundling()
-            ),
+            code=_lambda.Code.from_asset("../src/optimized/processors"),
             role=self.lambda_execution_role,
             memory_size=512,
             timeout=Duration.seconds(300),
@@ -457,10 +376,7 @@ class PerformanceOptimizationStack(Stack):
             function_name=f"avesa-chunk-processor-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="chunk_processor.lambda_handler",
-            code=_lambda.Code.from_asset(
-                "../src/optimized/processors",
-                bundling=BundlingOptionsFactory.get_optimized_shared_bundling()
-            ),
+            code=_lambda.Code.from_asset("../src/optimized/processors"),
             role=self.lambda_execution_role,
             memory_size=1024,  # Higher memory for data processing
             timeout=Duration.seconds(900),  # 15 minutes
@@ -475,10 +391,7 @@ class PerformanceOptimizationStack(Stack):
             function_name=f"avesa-error-handler-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="error_handler.lambda_handler",
-            code=_lambda.Code.from_asset(
-                "../src/optimized/helpers",
-                bundling=BundlingOptionsFactory.get_optimized_shared_bundling()
-            ),
+            code=_lambda.Code.from_asset("../src/optimized/helpers"),
             role=self.lambda_execution_role,
             memory_size=256,
             timeout=Duration.seconds(60),
@@ -493,10 +406,7 @@ class PerformanceOptimizationStack(Stack):
             function_name=f"avesa-result-aggregator-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="result_aggregator.lambda_handler",
-            code=_lambda.Code.from_asset(
-                "../src/optimized/helpers",
-                bundling=BundlingOptionsFactory.get_optimized_shared_bundling()
-            ),
+            code=_lambda.Code.from_asset("../src/optimized/helpers"),
             role=self.lambda_execution_role,
             memory_size=512,
             timeout=Duration.seconds(300),
@@ -511,10 +421,7 @@ class PerformanceOptimizationStack(Stack):
             function_name=f"avesa-completion-notifier-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="completion_notifier.lambda_handler",
-            code=_lambda.Code.from_asset(
-                "../src/optimized/helpers",
-                bundling=BundlingOptionsFactory.get_optimized_shared_bundling()
-            ),
+            code=_lambda.Code.from_asset("../src/optimized/helpers"),
             role=self.lambda_execution_role,
             memory_size=256,
             timeout=Duration.seconds(60),
@@ -522,9 +429,29 @@ class PerformanceOptimizationStack(Stack):
             log_retention=logs.RetentionDays.ONE_MONTH
         )
 
-        # Canonical Transform Functions using simple asset packaging
+        # Create Lambda layers for canonical transform functions
+        # AWS managed pandas layer
+        aws_pandas_layer = _lambda.LayerVersion.from_layer_version_arn(
+            self,
+            "AWSPandasLayer",
+            layer_version_arn="arn:aws:lambda:us-east-2:336392948345:layer:AWSSDKPandas-Python39:13"
+        )
+        
+        # Existing ClickHouse dependencies layer
+        clickhouse_layer = _lambda.LayerVersion.from_layer_version_arn(
+            self,
+            "ClickHouseLayer",
+            layer_version_arn="arn:aws:lambda:us-east-2:123938354448:layer:clickhouse-dependencies-dev:5"
+        )
+
+        # Canonical Transform Functions using simple asset packaging with Lambda layers
+        # NOTE: These are the ONLY canonical transform functions - removed from deprecated ConnectWise stack
         canonical_tables = ['companies', 'contacts', 'tickets', 'time_entries']
         for table in canonical_tables:
+            # Add CANONICAL_TABLE environment variable for each function
+            canonical_env = common_env.copy()
+            canonical_env["CANONICAL_TABLE"] = table
+            
             functions[f'canonical_transform_{table}'] = _lambda.Function(
                 self,
                 f"CanonicalTransform{table.title().replace('_', '')}Lambda",
@@ -535,25 +462,12 @@ class PerformanceOptimizationStack(Stack):
                 role=self.lambda_execution_role,
                 memory_size=1024,
                 timeout=Duration.seconds(900),
-                environment=common_env,
+                environment=canonical_env,
+                layers=[aws_pandas_layer, clickhouse_layer],  # Add both layers for pandas/pyarrow and ClickHouse dependencies
                 log_retention=logs.RetentionDays.ONE_MONTH
             )
 
-        # ClickHouse Loader Functions using simple asset packaging
-        for table in canonical_tables:
-            functions[f'clickhouse_loader_{table}'] = _lambda.Function(
-                self,
-                f"ClickhouseLoader{table.title().replace('_', '')}Lambda",
-                function_name=f"clickhouse-loader-{table.replace('_', '-')}-{self.env_name}",
-                runtime=_lambda.Runtime.PYTHON_3_9,
-                handler="lambda_function.lambda_handler",
-                code=_lambda.Code.from_asset("../src/clickhouse/data_loader"),
-                role=self.lambda_execution_role,
-                memory_size=1024,
-                timeout=Duration.seconds(900),
-                environment=common_env,
-                log_retention=logs.RetentionDays.ONE_MONTH
-            )
+        # NOTE: ClickHouse Loader Functions are created in ClickHouseStack - removed duplicates
 
         return functions, state_machines
 

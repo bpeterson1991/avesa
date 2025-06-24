@@ -138,7 +138,6 @@ def create_tables(client, dry_run: bool = False):
             record_version UInt32
         )
         ENGINE = MergeTree()
-        PARTITION BY toYYYYMM(effective_date)
         ORDER BY (tenant_id, id, effective_date)
         SETTINGS index_granularity = 8192
         """,
@@ -161,7 +160,6 @@ def create_tables(client, dry_run: bool = False):
             record_version UInt32
         )
         ENGINE = MergeTree()
-        PARTITION BY toYYYYMM(effective_date)
         ORDER BY (tenant_id, id, effective_date)
         SETTINGS index_granularity = 8192
         """,
@@ -186,7 +184,6 @@ def create_tables(client, dry_run: bool = False):
             record_version UInt32
         )
         ENGINE = MergeTree()
-        PARTITION BY toYYYYMM(created_date)
         ORDER BY (tenant_id, id, effective_date)
         SETTINGS index_granularity = 8192
         """,
@@ -208,7 +205,6 @@ def create_tables(client, dry_run: bool = False):
             record_version UInt32
         )
         ENGINE = MergeTree()
-        PARTITION BY toYYYYMM(date_entered)
         ORDER BY (tenant_id, id, effective_date)
         SETTINGS index_granularity = 8192
         """

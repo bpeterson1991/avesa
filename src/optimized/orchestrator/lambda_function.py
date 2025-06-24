@@ -7,6 +7,7 @@ the overall processing workflow through Step Functions.
 """
 
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
@@ -14,7 +15,7 @@ from typing import Dict, List, Any, Optional
 import boto3
 from botocore.exceptions import ClientError
 
-# Import shared modules from root shared directory
+# Import shared modules from local shared directory
 from shared.config_simple import Config, TenantConfig
 from shared.logger import PipelineLogger
 from shared.aws_clients import get_dynamodb_client, get_cloudwatch_client
@@ -251,7 +252,7 @@ class PipelineOrchestrator:
         """
         try:
             # Import dynamic utilities for service discovery
-            from utils import discover_canonical_tables, get_canonical_table_for_endpoint
+            from shared.utils import discover_canonical_tables, get_canonical_table_for_endpoint
             
             # Dynamic estimates based on canonical table types (in seconds)
             canonical_estimates = {
@@ -295,7 +296,7 @@ class PipelineOrchestrator:
                             for canonical_table in canonical_tables:
                                 # Check if this service contributes to this canonical table
                                 try:
-                                    from utils import get_service_tables_for_canonical
+                                    from shared.utils import get_service_tables_for_canonical
                                     service_tables = get_service_tables_for_canonical(canonical_table)
                                     if service_name in service_tables:
                                         tenant_time += canonical_estimates.get(canonical_table, 180)

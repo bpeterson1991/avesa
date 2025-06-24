@@ -6,8 +6,8 @@ with shared tables approach for multi-tenant SaaS application.
 
 Features:
 - ClickHouse Cloud deployment with VPC PrivateLink
-- Shared tables with tenant_id partitioning
-- Row-level security for tenant isolation
+- Shared tables with tenant isolation via row-level security
+- Optimized indexing for query performance
 - IAM roles and security policies
 - Network security groups and access controls
 """
@@ -30,6 +30,7 @@ from aws_cdk import (
 )
 from constructs import Construct
 from typing import Dict, Any
+# Removed bundling utils import - using simple asset deployment instead
 
 
 class ClickHouseStack(Stack):
@@ -301,12 +302,36 @@ class ClickHouseStack(Stack):
         """Create Lambda functions for S3 to ClickHouse data movement."""
         lambdas = {}
         
+        # Create ClickHouse Lambda layer with proper path resolution
+        import os
+        layer_zip_path = os.path.join(os.path.dirname(__file__), "..", "..", "lambda-layers", "clickhouse", "clickhouse-layer.zip")
+        
+        clickhouse_layer = _lambda.LayerVersion(
+            self,
+            "ClickHouseLayer",
+            layer_version_name=f"clickhouse-dependencies-{self.env_name}",
+            code=_lambda.Code.from_asset(layer_zip_path),
+            compatible_runtimes=[_lambda.Runtime.PYTHON_3_10],
+            description=f"ClickHouse dependencies for {self.env_name}: clickhouse-connect==0.8.17, lz4==4.4.4, zstandard==0.23.0, certifi, urllib3, pytz",
+            removal_policy=RemovalPolicy.RETAIN  # Retain layer versions for rollback capability
+        )
+        
+        # Store layer reference for outputs
+        self.clickhouse_layer = clickhouse_layer
+        
+        # AWS Pandas Layer for pandas and pyarrow functionality
+        aws_pandas_layer = _lambda.LayerVersion.from_layer_version_arn(
+            self,
+            "AWSPandasLayer",
+            f"arn:aws:lambda:{self.region}:336392948345:layer:AWSSDKPandas-Python310:13"
+        )
+        
         # Schema initialization Lambda
         lambdas["schema_init"] = _lambda.Function(
             self,
             "ClickHouseSchemaInit",
             function_name=f"clickhouse-schema-init-{self.env_name}",
-            runtime=_lambda.Runtime.PYTHON_3_9,
+            runtime=_lambda.Runtime.PYTHON_3_10,
             handler="lambda_function.lambda_handler",
             code=_lambda.Code.from_asset("../src/clickhouse/schema_init"),
             role=self.lambda_role,
@@ -319,7 +344,8 @@ class ClickHouseStack(Stack):
                 "CLICKHOUSE_SECRET_NAME": self.clickhouse_secret.secret_name,
                 "ENVIRONMENT": self.env_name
             },
-            log_retention=logs.RetentionDays.ONE_MONTH
+            log_retention=logs.RetentionDays.ONE_MONTH,
+            layers=[clickhouse_layer, aws_pandas_layer]
         )
         
         # Data loader Lambda for each table
@@ -329,7 +355,7 @@ class ClickHouseStack(Stack):
                 self,
                 f"ClickHouseLoader{table.title().replace('_', '')}",
                 function_name=f"clickhouse-loader-{table.replace('_', '-')}-{self.env_name}",
-                runtime=_lambda.Runtime.PYTHON_3_9,
+                runtime=_lambda.Runtime.PYTHON_3_10,
                 handler="lambda_function.lambda_handler",
                 code=_lambda.Code.from_asset("../src/clickhouse/data_loader"),
                 role=self.lambda_role,
@@ -346,7 +372,8 @@ class ClickHouseStack(Stack):
                     "TARGET_TABLE": table,
                     "ENVIRONMENT": self.env_name
                 },
-                log_retention=logs.RetentionDays.ONE_MONTH
+                log_retention=logs.RetentionDays.ONE_MONTH,
+                layers=[clickhouse_layer, aws_pandas_layer]
             )
         
         # SCD Type 2 processor Lambda
@@ -354,7 +381,7 @@ class ClickHouseStack(Stack):
             self,
             "ClickHouseSCDProcessor",
             function_name=f"clickhouse-scd-processor-{self.env_name}",
-            runtime=_lambda.Runtime.PYTHON_3_9,
+            runtime=_lambda.Runtime.PYTHON_3_10,
             handler="lambda_function.lambda_handler",
             code=_lambda.Code.from_asset("../src/clickhouse/scd_processor"),
             role=self.lambda_role,
@@ -367,7 +394,8 @@ class ClickHouseStack(Stack):
                 "CLICKHOUSE_SECRET_NAME": self.clickhouse_secret.secret_name,
                 "ENVIRONMENT": self.env_name
             },
-            log_retention=logs.RetentionDays.ONE_MONTH
+            log_retention=logs.RetentionDays.ONE_MONTH,
+            layers=[clickhouse_layer, aws_pandas_layer]
         )
         
         return lambdas
@@ -556,6 +584,13 @@ class ClickHouseStack(Stack):
             "ClickHouseSecretArn",
             value=self.clickhouse_secret.secret_arn,
             description="ARN of the ClickHouse connection secret"
+        )
+        
+        CfnOutput(
+            self,
+            "ClickHouseLayerArn",
+            value=self.clickhouse_layer.layer_version_arn,
+            description="ARN of the ClickHouse Lambda layer with dependencies"
         )
         
         CfnOutput(

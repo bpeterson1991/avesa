@@ -1,16 +1,19 @@
-# AVESA ClickHouse Data Loader Lambda Dependencies
-# Dependencies for ClickHouse data loading and analytics
+# AVESA ClickHouse Data Loader - Optimized Dependencies
+# Leverages AWS Pandas Layer for pandas, pyarrow, boto3, requests
+# Only includes dependencies NOT provided by AWS Pandas Layer
 
-# AWS SDK - Core Lambda runtime dependency
-boto3>=1.38.39
-botocore>=1.38.39
+# ClickHouse Integration - Core package and required dependencies
+clickhouse-connect==0.8.17
 
-# HTTP Library - For API calls
-requests>=2.31.0
+# ClickHouse Connect Dependencies (not in AWS Pandas Layer)
+certifi>=2023.7.22
+lz4>=3.1.0
+zstandard>=0.21.0
 
-# Data Processing Libraries - For data transformation
-pandas>=2.2.3
-pyarrow>=18.1.0
-
-# ClickHouse Integration - For analytics and data loading
-clickhouse-connect>=0.8.17
+# Note: The following are provided by AWS Pandas Layer:
+# - boto3>=1.38.39
+# - botocore>=1.38.39
+# - pandas>=2.2.3
+# - pyarrow>=18.1.0
+# - requests>=2.31.0
+# - numpy, python-dateutil, pytz, s3transfer, urllib3, jmespath

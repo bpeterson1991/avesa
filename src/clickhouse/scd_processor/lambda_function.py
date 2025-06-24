@@ -20,59 +20,6 @@ from shared.scd_config import SCDConfigManager, get_scd_type, is_scd_type_2, fil
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-def optimize_table_partitions(client, table_name: str) -> Dict[str, Any]:
-    """Optimize table partitions for better performance."""
-    try:
-        # Get partition information
-        partitions_query = f"""
-        SELECT partition, count() as records, min(effective_date) as min_date, max(effective_date) as max_date
-        FROM {table_name}
-        GROUP BY partition
-        ORDER BY partition
-        """
-        
-        partitions = client.query(partitions_query).result_rows
-        
-        # Optimize partitions if needed
-        optimization_results = []
-        for partition_info in partitions:
-            partition_id = partition_info[0]
-            record_count = partition_info[1]
-            
-            try:
-                # Optimize partition
-                optimize_query = f"OPTIMIZE TABLE {table_name} PARTITION '{partition_id}'"
-                client.command(optimize_query)
-                
-                optimization_results.append({
-                    'partition': partition_id,
-                    'records': record_count,
-                    'status': 'optimized'
-                })
-                
-            except Exception as e:
-                logger.warning(f"Failed to optimize partition {partition_id}: {e}")
-                optimization_results.append({
-                    'partition': partition_id,
-                    'records': record_count,
-                    'status': 'failed',
-                    'error': str(e)
-                })
-        
-        logger.info(f"Optimized {len(optimization_results)} partitions for {table_name}")
-        return {
-            'table': table_name,
-            'partitions_processed': len(optimization_results),
-            'results': optimization_results
-        }
-        
-    except Exception as e:
-        logger.error(f"Failed to optimize table partitions: {e}")
-        return {
-            'table': table_name,
-            'status': 'error',
-            'error': str(e)
-        }
 
 def cleanup_expired_records(client, table_name: str, retention_days: int = 2555) -> Dict[str, Any]:
     """Clean up very old expired records to manage storage."""
@@ -333,15 +280,11 @@ def process_table_scd(client, table_name: str) -> Dict[str, Any]:
             fix_result = fix_scd_issues(client, table_name)
             results['operations']['fixes'] = fix_result
         
-        # 3. Optimize partitions
-        optimization_result = optimize_table_partitions(client, table_name)
-        results['operations']['optimization'] = optimization_result
-        
-        # 4. Cleanup old records
+        # 3. Cleanup old records
         cleanup_result = cleanup_expired_records(client, table_name)
         results['operations']['cleanup'] = cleanup_result
         
-        # 5. Generate statistics
+        # 4. Generate statistics
         stats_result = generate_scd_statistics(client, table_name)
         results['operations']['statistics'] = stats_result
         
@@ -376,7 +319,8 @@ def lambda_handler(event, context):
         config = Environment.get_config(env_name)
         
         # Get ClickHouse connection using shared client
-        client = ClickHouseClient.from_environment(os.environ.get('ENVIRONMENT', 'dev'))
+        clickhouse_secret = os.environ.get('CLICKHOUSE_SECRET_NAME', 'clickhouse-credentials-dev')
+        client = ClickHouseClient(clickhouse_secret, region_name='us-east-2')
         logger.info("Successfully connected to ClickHouse")
         
         # Determine tables to process

@@ -216,18 +216,53 @@ def process_tenant_canonical_data(
         
         # Load and transform data
         transformed_records = []
+        total_raw_records = 0
+        
         for raw_file in raw_files:
             records = load_and_transform_raw_data(config, raw_file, canonical_table, logger)
-            transformed_records.extend(records)
-        
+            if records:
+                # Count raw records before transformation
+                raw_count = len(records)
+                total_raw_records += raw_count
+                
+                # Filter out None records (failed transformations)
+                valid_records = [r for r in records if r is not None]
+                transformed_records.extend(valid_records)
+                
+                # EMERGENCY MONITORING: Log transformation success rate
+                success_rate = len(valid_records) / raw_count if raw_count > 0 else 0
+                logger.info(f"File {raw_file}: {raw_count} raw → {len(valid_records)} valid (success rate: {success_rate:.2%})")
+                
+                if success_rate < 0.5:  # Less than 50% success rate
+                    logger.error(f"CRITICAL: Low transformation success rate {success_rate:.2%} for {raw_file}")
+
+        # EMERGENCY CIRCUIT BREAKER: Prevent writing if transformation success rate is too low
+        if total_raw_records > 0:
+            overall_success_rate = len(transformed_records) / total_raw_records
+            logger.info(f"Overall transformation: {total_raw_records} raw → {len(transformed_records)} valid (success rate: {overall_success_rate:.2%})")
+            
+            if overall_success_rate < 0.1:  # Less than 10% success rate
+                logger.error(f"EMERGENCY HALT: Transformation success rate {overall_success_rate:.2%} is critically low")
+                logger.error(f"This indicates field mapping issues causing metadata-only records")
+                return {
+                    'tenant_id': tenant_id,
+                    'canonical_table': canonical_table,
+                    'status': 'emergency_halt',
+                    'record_count': 0,
+                    'message': f'Emergency halt: transformation success rate {overall_success_rate:.2%} too low',
+                    'raw_record_count': total_raw_records,
+                    'valid_record_count': len(transformed_records)
+                }
+
         if not transformed_records:
-            logger.info(f"No records to transform after processing {len(raw_files)} files")
+            logger.info(f"No valid records to transform after processing {len(raw_files)} files")
             return {
                 'tenant_id': tenant_id,
                 'canonical_table': canonical_table,
                 'status': 'success',
                 'record_count': 0,
-                'message': 'No records to transform'
+                'message': 'No valid records to transform',
+                'raw_record_count': total_raw_records
             }
         
         # Apply SCD logic based on table configuration
@@ -242,7 +277,7 @@ def process_tenant_canonical_data(
         
         # Write canonical data to S3
         timestamp = get_timestamp()
-        s3_key = get_s3_key(tenant_id, 'canonical', canonical_table, canonical_table, timestamp)
+        s3_key = f"{tenant_id}/canonical/{canonical_table}/{timestamp}.parquet"
         
         write_canonical_data_to_s3(config, s3_key, scd_records, logger)
         
@@ -256,6 +291,13 @@ def process_tenant_canonical_data(
             record_count=len(scd_records),
             execution_time=execution_time
         )
+        
+        # Trigger ClickHouse data loader for seamless pipeline
+        try:
+            trigger_clickhouse_loader(tenant_id, canonical_table, logger)
+        except Exception as e:
+            logger.warning(f"Failed to trigger ClickHouse loader: {e}")
+            # Don't fail the canonical transformation if ClickHouse trigger fails
         
         return {
             'tenant_id': tenant_id,
@@ -411,8 +453,11 @@ def load_and_transform_raw_data(config: Config, s3_key: str, canonical_table: st
         
         # Transform data according to mapping
         transformed_records = []
+        # Extract tenant_id from s3_key path
+        tenant_id = s3_key.split('/')[0] if '/' in s3_key else None
+        
         for _, row in df.iterrows():
-            transformed_record = transform_record(row.to_dict(), mapping, canonical_table)
+            transformed_record = transform_record(row.to_dict(), mapping, canonical_table, tenant_id)
             if transformed_record:
                 transformed_records.append(transformed_record)
         
@@ -431,9 +476,45 @@ def load_canonical_mapping(canonical_table: str) -> Dict[str, Any]:
     return canonical_mapper.load_mapping(canonical_table, bucket=bucket_name)
 
 
-def transform_record(raw_record: Dict[str, Any], mapping: Dict[str, Any], canonical_table: str) -> Optional[Dict[str, Any]]:
-    """Transform a single record to canonical format using shared CanonicalMapper."""
-    return canonical_mapper.transform_record(raw_record, mapping, canonical_table)
+def transform_record(raw_record: Dict[str, Any], mapping: Dict[str, Any], canonical_table: str, tenant_id: str = None) -> Optional[Dict[str, Any]]:
+    """Transform a single record to canonical format using shared CanonicalMapper with emergency validation."""
+    transformed_record = canonical_mapper.transform_record(raw_record, mapping, canonical_table)
+    
+    # Add tenant_id to the transformed record if provided
+    if transformed_record and tenant_id:
+        transformed_record['tenant_id'] = tenant_id
+    
+    # EMERGENCY DATA CORRUPTION PREVENTION
+    if transformed_record:
+        # Validate that business fields are present (not just metadata)
+        business_fields = get_required_business_fields(canonical_table)
+        missing_fields = []
+        
+        for field in business_fields:
+            if field not in transformed_record or transformed_record[field] is None:
+                missing_fields.append(field)
+        
+        if missing_fields:
+            logger.error(f"EMERGENCY HALT: Missing critical business fields {missing_fields} in {canonical_table}")
+            logger.error(f"Raw record keys: {list(raw_record.keys())}")
+            logger.error(f"Transformed record keys: {list(transformed_record.keys())}")
+            logger.error(f"Mapping fields: {mapping.get('fields', {})}")
+            
+            # CIRCUIT BREAKER: Return None to prevent writing metadata-only records
+            return None
+    
+    return transformed_record
+
+
+def get_required_business_fields(canonical_table: str) -> List[str]:
+    """Get list of required business fields that must be present to prevent metadata-only records."""
+    required_fields = {
+        'companies': ['id', 'name'],  # FIXED: Match actual mapping output field name
+        'contacts': ['id', 'first_name', 'last_name'],  # Must have ID and name fields
+        'tickets': ['id', 'summary'],  # Must have ID and summary
+        'time_entries': ['id', 'actual_hours']  # FIXED: Match corrected field name
+    }
+    return required_fields.get(canonical_table, ['id'])
 
 
 def calculate_record_hash(record: Dict[str, Any]) -> str:
@@ -456,7 +537,7 @@ def calculate_record_hash(record: Dict[str, Any]) -> str:
 
 
 def apply_scd_type1_logic(config: Config, tenant_id: str, canonical_table: str, new_records: List[Dict[str, Any]], logger: PipelineLogger) -> List[Dict[str, Any]]:
-    """Apply SCD Type 1 logic - simple current data only with deduplication."""
+    """Apply SCD Type 1 logic - simple current data only with deduplication. NO SCD Type 2 fields for Type 1 tables."""
     try:
         import pandas as pd
         from datetime import datetime, timezone
@@ -509,15 +590,20 @@ def apply_scd_type1_logic(config: Config, tenant_id: str, canonical_table: str, 
         for _, row in df_deduplicated.iterrows():
             record = row.to_dict()
             
-            # For SCD Type 1, all records are current with no versioning
-            record['effective_start_date'] = record['updated_date']
-            record['effective_end_date'] = None
-            record['is_current'] = True  # All records are current in Type 1
+            # CRITICAL FIX: For SCD Type 1, DO NOT add SCD Type 2 fields
+            # SCD Type 1 means simple upsert with no historical tracking
+            # Remove any SCD Type 2 fields that might have been added
+            scd_type2_fields = ['effective_start_date', 'effective_end_date', 'is_current']
+            for field in scd_type2_fields:
+                record.pop(field, None)
+            
+            # Add only the basic metadata fields for SCD Type 1
             record['record_hash'] = calculate_record_hash(record)
+            record['ingestion_timestamp'] = datetime.now(timezone.utc).isoformat()
             
             scd_records.append(record)
         
-        logger.info(f"SCD Type 1 processing complete: {len(scd_records)} current records")
+        logger.info(f"SCD Type 1 processing complete: {len(scd_records)} current records (NO SCD Type 2 fields)")
         
         return scd_records
         
@@ -706,3 +792,41 @@ def write_canonical_data_to_s3(config: Config, s3_key: str, data: List[Dict[str,
         
     except Exception as e:
         raise Exception(f"Failed to write canonical data to S3: {str(e)}")
+
+
+def trigger_clickhouse_loader(tenant_id: str, canonical_table: str, logger: PipelineLogger):
+    """Trigger ClickHouse data loader for seamless pipeline orchestration."""
+    import boto3
+    import json
+    
+    try:
+        # Get Lambda client
+        lambda_client = boto3.client('lambda')
+        
+        # Construct ClickHouse loader function name
+        env_name = os.environ.get('ENVIRONMENT', 'dev')
+        function_name = f"clickhouse-loader-{canonical_table}-{env_name}"
+        
+        # Prepare payload
+        payload = {
+            'tenant_id': tenant_id,
+            'table_name': canonical_table
+        }
+        
+        logger.info(f"Triggering ClickHouse loader: {function_name}")
+        
+        # Invoke ClickHouse loader asynchronously
+        response = lambda_client.invoke(
+            FunctionName=function_name,
+            InvocationType='Event',  # Asynchronous invocation
+            Payload=json.dumps(payload)
+        )
+        
+        if response['StatusCode'] == 202:
+            logger.info(f"Successfully triggered ClickHouse loader for {tenant_id}/{canonical_table}")
+        else:
+            logger.warning(f"ClickHouse loader trigger returned status: {response['StatusCode']}")
+            
+    except Exception as e:
+        logger.error(f"Failed to trigger ClickHouse loader: {str(e)}")
+        raise

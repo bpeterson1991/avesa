@@ -135,7 +135,8 @@ class BackfillStack(Stack):
                         "lambda:InvokeFunction"
                     ],
                     resources=[
-                        f"arn:aws:lambda:{self.region}:{self.account}:function:avesa-*-{self.env_name}"
+                        f"arn:aws:lambda:{self.region}:{self.account}:function:avesa-*-{self.env_name}",
+                        f"arn:aws:lambda:{self.region}:{self.account}:function:clickhouse-*-{self.env_name}"
                     ]
                 ),
                 # Note: State machine permissions will be granted after creation to avoid circular dependency

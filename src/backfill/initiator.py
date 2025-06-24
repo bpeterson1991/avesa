@@ -160,6 +160,88 @@ def handle_manual_trigger(event: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def is_master_data_table(service: str, endpoint_or_table: str) -> bool:
+    """
+    Determine if a table contains master data (should not use date ranges).
+    
+    Master data tables contain relatively static reference data like companies, contacts, users.
+    Transactional data tables contain time-series data like tickets, time entries, opportunities.
+    """
+    # Get canonical table name first
+    canonical_table = get_canonical_table_name(service, endpoint_or_table)
+    
+    # Define master data tables by canonical names
+    master_data_tables = {
+        'connectwise': [
+            'companies',
+            'contacts',
+            'members'
+        ],
+        'servicenow': [
+            'contacts',
+            'user_groups'
+        ],
+        'salesforce': [
+            'companies',
+            'contacts',
+            'users'
+        ]
+    }
+    
+    service_master_tables = master_data_tables.get(service, [])
+    return canonical_table in service_master_tables
+
+
+def get_canonical_table_name(service: str, endpoint_or_table: str) -> str:
+    """
+    Map API endpoint or table reference to canonical table name.
+    
+    Args:
+        service: Service name (e.g., 'connectwise')
+        endpoint_or_table: API endpoint (e.g., 'company/companies') or table name (e.g., 'companies')
+        
+    Returns:
+        Canonical table name for ClickHouse and orchestrator
+    """
+    # Mapping from API endpoints to canonical table names
+    endpoint_to_table = {
+        'connectwise': {
+            'service/tickets': 'tickets',
+            'time/entries': 'time_entries',
+            'company/companies': 'companies',
+            'company/contacts': 'contacts',
+            'procurement/products': 'products',
+            'finance/agreements': 'agreements',
+            'project/projects': 'projects',
+            'system/members': 'members'
+        },
+        'servicenow': {
+            'incident': 'tickets',
+            'change_request': 'change_requests',
+            'problem': 'problems',
+            'user': 'contacts',
+            'sys_user_group': 'user_groups'
+        },
+        'salesforce': {
+            'Account': 'companies',
+            'Contact': 'contacts',
+            'Opportunity': 'opportunities',
+            'Case': 'tickets',
+            'Lead': 'leads',
+            'User': 'users'
+        }
+    }
+    
+    service_mappings = endpoint_to_table.get(service, {})
+    
+    # Try direct mapping first
+    if endpoint_or_table in service_mappings:
+        return service_mappings[endpoint_or_table]
+    
+    # If not found, assume it's already a canonical table name
+    return endpoint_or_table
+
+
 def backfill_exists(tenant_id: str, service: str) -> bool:
     """Check if a backfill job already exists for the given tenant/service."""
     try:
@@ -196,14 +278,23 @@ def trigger_backfill_for_service(
     # Generate unique job ID
     job_id = str(uuid.uuid4())
     
-    # Set default dates if not provided
-    if not end_date:
-        end_date = datetime.now(timezone.utc).isoformat()
+    # Check if this is master data (should not use date ranges)
+    is_master_data = table_name and is_master_data_table(service, table_name)
     
-    if not start_date:
-        # Default to 2 years back for comprehensive backfill
-        start_dt = datetime.now(timezone.utc) - timedelta(days=730)
-        start_date = start_dt.isoformat()
+    if is_master_data:
+        # Master data should not use date ranges - let backfill function handle without dates
+        logger.info(f"Master data table detected ({table_name}) - skipping date range setup")
+        start_date = None
+        end_date = None
+    else:
+        # Set default dates if not provided for transactional data
+        if not end_date:
+            end_date = datetime.now(timezone.utc).isoformat()
+        
+        if not start_date:
+            # Default to 2 years back for comprehensive backfill
+            start_dt = datetime.now(timezone.utc) - timedelta(days=730)
+            start_date = start_dt.isoformat()
     
     # Create backfill job record
     backfill_jobs_table = dynamodb.Table(BACKFILL_JOBS_TABLE)

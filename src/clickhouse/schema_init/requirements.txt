@@ -1,0 +1,19 @@
+# AVESA ClickHouse Schema Init - Optimized Dependencies
+# Leverages AWS Pandas Layer for pandas, pyarrow, boto3, requests
+# Only includes dependencies NOT provided by AWS Pandas Layer
+
+# ClickHouse Integration - Core package and required dependencies
+clickhouse-connect==0.8.17
+
+# ClickHouse Connect Dependencies (not in AWS Pandas Layer)
+certifi>=2023.7.22
+lz4>=3.1.0
+zstandard>=0.21.0
+
+# Note: The following are provided by AWS Pandas Layer:
+# - boto3>=1.38.39
+# - botocore>=1.38.39  
+# - pandas>=2.2.3
+# - pyarrow>=18.1.0
+# - requests>=2.31.0
+# - numpy, python-dateutil, pytz, s3transfer, urllib3, jmespath

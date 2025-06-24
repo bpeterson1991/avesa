@@ -174,7 +174,7 @@ start_real_mode() {
     export NODE_ENV=development
     export CLICKHOUSE_MODE=real
     export PORT=3001
-    export CLICKHOUSE_SECRET_NAME=arn:aws:secretsmanager:us-east-2:123938354448:secret:clickhouse-connection-dev-V9zSgO
+    export CLICKHOUSE_SECRET_NAME=clickhouse-connection-dev
     export AWS_REGION=us-east-2
     export JWT_SECRET=avesa-demo-secret-key-2024
     

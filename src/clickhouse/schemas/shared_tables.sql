@@ -1,5 +1,5 @@
 -- ClickHouse Multi-Tenant Shared Tables Schema
--- Implements shared tables with tenant_id partitioning for multi-tenant SaaS
+-- Implements shared tables with optimized indexing for multi-tenant SaaS
 -- Supports SCD Type 2 with clean business names (no _scd suffix)
 
 -- =============================================================================
@@ -81,7 +81,6 @@ CREATE TABLE IF NOT EXISTS companies (
     record_version UInt32 DEFAULT 1
 )
 ENGINE = MergeTree()
-PARTITION BY (tenant_id, toYYYYMM(created_date))
 ORDER BY (tenant_id, id, created_date)
 SETTINGS index_granularity = 8192;
 
@@ -171,7 +170,6 @@ CREATE TABLE IF NOT EXISTS contacts (
     record_version UInt32 DEFAULT 1
 )
 ENGINE = MergeTree()
-PARTITION BY (tenant_id, toYYYYMM(created_date))
 ORDER BY (tenant_id, id, created_date)
 SETTINGS index_granularity = 8192;
 
@@ -247,7 +245,6 @@ CREATE TABLE IF NOT EXISTS tickets (
     record_version UInt32 DEFAULT 1
 )
 ENGINE = MergeTree()
-PARTITION BY (tenant_id, toYYYYMM(created_date))
 ORDER BY (tenant_id, id, effective_date)
 SETTINGS index_granularity = 8192;
 
@@ -313,7 +310,6 @@ CREATE TABLE IF NOT EXISTS time_entries (
     record_version UInt32 DEFAULT 1
 )
 ENGINE = MergeTree()
-PARTITION BY (tenant_id, toYYYYMM(date_entered))
 ORDER BY (tenant_id, id, date_entered)
 SETTINGS index_granularity = 8192;
 
@@ -345,7 +341,6 @@ ALTER TABLE time_entries ADD INDEX idx_time_company (company_id) TYPE bloom_filt
 -- Company summary view
 CREATE MATERIALIZED VIEW IF NOT EXISTS company_summary
 ENGINE = SummingMergeTree()
-PARTITION BY tenant_id
 ORDER BY (tenant_id, company_id, date)
 AS SELECT
     tenant_id,
@@ -360,7 +355,6 @@ GROUP BY tenant_id, company_id, company_name, date;
 -- Ticket metrics view
 CREATE MATERIALIZED VIEW IF NOT EXISTS ticket_metrics
 ENGINE = SummingMergeTree()
-PARTITION BY tenant_id
 ORDER BY (tenant_id, company_id, status, date)
 AS SELECT
     tenant_id,

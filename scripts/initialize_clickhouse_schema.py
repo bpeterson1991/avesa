@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Direct ClickHouse Schema Initialization Script
-Initializes the ClickHouse database schema for multi-tenant SaaS using the shared tables.
+Initializes the ClickHouse database schema for multi-tenant SaaS using optimized non-partitioned tables.
 """
 import json
 import boto3

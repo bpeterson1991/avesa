@@ -21,6 +21,14 @@
         "finance/agreements",
         "project/projects",
         "system/members"
+      ],
+      "master_data_endpoints": [
+        "company/companies",
+        "company/contacts"
+      ],
+      "transactional_data_endpoints": [
+        "service/tickets",
+        "time/entries"
       ]
     },
     "servicenow": {

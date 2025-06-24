@@ -1,0 +1,19 @@
+# Backfill Lambda Function Dependencies
+# Version standardization follows project guidelines
+
+# AWS SDK - Required for all AWS service interactions
+# Version 1.38.39 is standardized across all components
+boto3>=1.38.39
+botocore>=1.38.39
+
+# HTTP Requests - Required for API calls to external services
+requests>=2.31.0
+
+# Date/Time handling
+python-dateutil>=2.8.2
+
+# JSON handling and data processing
+pandas>=2.0.0
+
+# Logging and utilities
+pytz>=2023.3

@@ -2,7 +2,7 @@
 ClickHouse Schema Initialization Lambda Function
 
 This function initializes the ClickHouse database schema for multi-tenant SaaS.
-It creates the shared tables with tenant_id partitioning and sets up indexes.
+It creates the shared tables and sets up indexes for optimal performance.
 """
 
 import json
@@ -180,7 +180,7 @@ def lambda_handler(event, context):
         config = Environment.get_config(env_name)
         
         # Get ClickHouse connection using shared client
-        client = ClickHouseClient.from_environment(os.environ.get('ENVIRONMENT', 'dev'))
+        client = ClickHouseClient.from_environment('CLICKHOUSE_SECRET_NAME')
         logger.info("Successfully connected to ClickHouse")
         
         # Read schema file

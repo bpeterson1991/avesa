@@ -175,9 +175,9 @@ If Lambda initialization fails, you can manually create the schema using ClickHo
 
 ```sql
 -- Connect to your ClickHouse Cloud service
--- Create shared tables with tenant partitioning
+-- Create shared tables with optimized indexing
 
-CREATE TABLE shared_companies (
+CREATE TABLE companies (
     tenant_id String,
     company_id String,
     name String,
@@ -192,7 +192,6 @@ CREATE TABLE shared_companies (
     is_current Boolean DEFAULT true,
     record_hash String
 ) ENGINE = MergeTree()
-PARTITION BY tenant_id
 ORDER BY (tenant_id, company_id, effective_date)
 SETTINGS index_granularity = 8192;
 
@@ -233,7 +232,7 @@ Handles incremental updates with change detection and historical tracking:
 Creates and manages ClickHouse database schema:
 
 **Key Features:**
-- Creates shared tables with tenant partitioning
+- Creates shared tables with tenant isolation
 - Implements SCD Type 2 schema design
 - Handles schema migrations and updates
 - Validates table structures
@@ -514,11 +513,12 @@ The infrastructure is ready and waiting for your ClickHouse Cloud service config
 
 ## Performance Optimization
 
-- **Partitioning**: Tables partitioned by tenant_id for query performance
-- **Indexing**: Optimized ORDER BY clauses for common query patterns
+- **Indexing**: Optimized ORDER BY clauses with tenant_id as primary key for efficient tenant isolation
+- **Query Optimization**: Efficient WHERE clause patterns for tenant-specific queries
 - **Batching**: Bulk operations for efficient data loading
 - **Compression**: ClickHouse native compression for storage efficiency
 - **Caching**: Query result caching for frequently accessed data
+- **SCD Type 2**: Efficient historical data tracking with proper indexing on effective_date and is_current
 
 ---
 

@@ -407,14 +407,13 @@ class ClickHouseSchemaManager:
             # Create field analysis view
             field_analysis_view = """
             CREATE OR REPLACE VIEW field_analysis AS
-            SELECT 
+            SELECT
                 table AS table_name,
                 name AS field_name,
                 type AS field_type,
-                is_in_partition_key,
                 is_in_sorting_key,
                 is_in_primary_key
-            FROM system.columns 
+            FROM system.columns
             WHERE database = currentDatabase()
               AND table IN ('companies', 'contacts', 'tickets', 'time_entries')
             ORDER BY table, name
