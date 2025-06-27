@@ -305,7 +305,7 @@ class ChunkProcessor:
             configured_page_size = table_config.get('page_size', 1000)
             
             # Memory optimization: Write to S3 every N batches to avoid memory accumulation
-            write_batch_size = 20  # Write to S3 every 5 API batches (20000 records max in memory)
+            write_batch_size = 50  # Write to S3 every 5 API batches (20000 records max in memory)
             batch_buffer = []
             batch_count = 0
             file_batch_number = 0  # Cumulative file counter (never resets)
