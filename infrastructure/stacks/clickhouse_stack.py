@@ -16,6 +16,7 @@ from aws_cdk import (
     Stack,
     Duration,
     RemovalPolicy,
+    BundlingOptions,
     aws_ec2 as ec2,
     aws_iam as iam,
     aws_secretsmanager as secretsmanager,
@@ -304,13 +305,13 @@ class ClickHouseStack(Stack):
         
         # Create ClickHouse Lambda layer with proper path resolution
         import os
-        layer_zip_path = os.path.join(os.path.dirname(__file__), "..", "..", "lambda-layers", "clickhouse", "clickhouse-layer.zip")
+        layer_path = os.path.join(os.path.dirname(__file__), "..", "..", "lambda-layers", "clickhouse")
         
         clickhouse_layer = _lambda.LayerVersion(
             self,
             "ClickHouseLayer",
             layer_version_name=f"clickhouse-dependencies-{self.env_name}",
-            code=_lambda.Code.from_asset(layer_zip_path),
+            code=_lambda.Code.from_asset(layer_path),
             compatible_runtimes=[_lambda.Runtime.PYTHON_3_10],
             description=f"ClickHouse dependencies for {self.env_name}: clickhouse-connect==0.8.17, lz4==4.4.4, zstandard==0.23.0, certifi, urllib3, pytz",
             removal_policy=RemovalPolicy.RETAIN  # Retain layer versions for rollback capability
@@ -319,11 +320,11 @@ class ClickHouseStack(Stack):
         # Store layer reference for outputs
         self.clickhouse_layer = clickhouse_layer
         
-        # AWS Pandas Layer for pandas and pyarrow functionality
+        # AWS Pandas Layer for data processing
         aws_pandas_layer = _lambda.LayerVersion.from_layer_version_arn(
             self,
-            "AWSPandasLayer",
-            f"arn:aws:lambda:{self.region}:336392948345:layer:AWSSDKPandas-Python310:13"
+            "AWSDataWranglerPandasLayer",
+            layer_version_arn=f"arn:aws:lambda:{self.region}:336392948345:layer:AWSSDKPandas-Python310:11"
         )
         
         # Schema initialization Lambda
@@ -333,9 +334,19 @@ class ClickHouseStack(Stack):
             function_name=f"clickhouse-schema-init-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_10,
             handler="lambda_function.lambda_handler",
-            code=_lambda.Code.from_asset("../src/clickhouse/schema_init"),
+            code=_lambda.Code.from_asset(
+                "../src",
+                bundling=BundlingOptions(
+                    image=_lambda.Runtime.PYTHON_3_10.bundling_image,
+                    command=[
+                        "bash", "-c",
+                        "cp -r /asset-input/clickhouse/schema_init/* /asset-output/ && "
+                        "cp -r /asset-input/shared /asset-output/"
+                    ]
+                )
+            ),
             role=self.lambda_role,
-            timeout=Duration.minutes(5),
+            timeout=Duration.seconds(180),
             memory_size=512,
             vpc=self.vpc,
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
@@ -354,12 +365,22 @@ class ClickHouseStack(Stack):
             lambdas[f"loader_{table}"] = _lambda.Function(
                 self,
                 f"ClickHouseLoader{table.title().replace('_', '')}",
-                function_name=f"clickhouse-loader-{table.replace('_', '-')}-{self.env_name}",
+                function_name=f"clickhouse-loader-{table.replace('-', '_')}-{self.env_name}",
                 runtime=_lambda.Runtime.PYTHON_3_10,
                 handler="lambda_function.lambda_handler",
-                code=_lambda.Code.from_asset("../src/clickhouse/data_loader"),
+                code=_lambda.Code.from_asset(
+                    "../src",
+                    bundling=BundlingOptions(
+                        image=_lambda.Runtime.PYTHON_3_10.bundling_image,
+                        command=[
+                            "bash", "-c",
+                            "cp -r /asset-input/clickhouse/data_loader/* /asset-output/ && "
+                            "cp -r /asset-input/shared /asset-output/"
+                        ]
+                    )
+                ),
                 role=self.lambda_role,
-                timeout=Duration.minutes(15),
+                timeout=Duration.seconds(180),
                 memory_size=1024,
                 vpc=self.vpc,
                 vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
@@ -383,9 +404,19 @@ class ClickHouseStack(Stack):
             function_name=f"clickhouse-scd-processor-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_10,
             handler="lambda_function.lambda_handler",
-            code=_lambda.Code.from_asset("../src/clickhouse/scd_processor"),
+            code=_lambda.Code.from_asset(
+                "../src",
+                bundling=BundlingOptions(
+                    image=_lambda.Runtime.PYTHON_3_10.bundling_image,
+                    command=[
+                        "bash", "-c",
+                        "cp -r /asset-input/clickhouse/scd_processor/* /asset-output/ && "
+                        "cp -r /asset-input/shared /asset-output/"
+                    ]
+                )
+            ),
             role=self.lambda_role,
-            timeout=Duration.minutes(10),
+            timeout=Duration.seconds(180),
             memory_size=1024,
             vpc=self.vpc,
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
@@ -407,17 +438,35 @@ class ClickHouseStack(Stack):
             self,
             "InitializeSchema",
             lambda_function=self.data_movement_lambdas["schema_init"],
-            output_path="$.Payload"
+            result_path="$.schema_result"
         )
         
-        # Parallel data loading for all tables
+        # Create Choice state to check if table_name is provided
+        table_name_choice = sfn.Choice(
+            self,
+            "CheckTableNameProvided",
+            comment="Route to single table or parallel processing based on table_name parameter"
+        )
+        
+        # Create single table loading tasks
+        tables = ["companies", "contacts", "tickets", "time_entries"]
+        single_table_tasks = {}
+        
+        for table in tables:
+            single_table_tasks[table] = sfn_tasks.LambdaInvoke(
+                self,
+                f"Load{table.title().replace('_', '')}DataSingle",
+                lambda_function=self.data_movement_lambdas[f"loader_{table}"],
+                output_path="$.Payload"
+            )
+        
+        # Parallel data loading for all tables (backward compatibility)
         parallel_loading = sfn.Parallel(
             self,
             "ParallelDataLoading",
             comment="Load data for all tables in parallel"
         )
         
-        tables = ["companies", "contacts", "tickets", "time_entries"]
         for table in tables:
             load_task = sfn_tasks.LambdaInvoke(
                 self,
@@ -426,14 +475,6 @@ class ClickHouseStack(Stack):
                 output_path="$.Payload"
             )
             parallel_loading.branch(load_task)
-        
-        # SCD processing
-        scd_task = sfn_tasks.LambdaInvoke(
-            self,
-            "ProcessSCDType2",
-            lambda_function=self.data_movement_lambdas["scd_processor"],
-            output_path="$.Payload"
-        )
         
         # Success state
         success_state = sfn.Succeed(
@@ -449,8 +490,24 @@ class ClickHouseStack(Stack):
             comment="Data pipeline failed"
         )
         
-        # Create the definition with error handling
-        # Add error handling to individual tasks
+        # Create separate SCD tasks for each path to avoid state reuse issues
+        # Only create SCD tasks for tables that actually need SCD processing (Type 2 tables)
+        scd_task_parallel = sfn_tasks.LambdaInvoke(
+            self,
+            "ProcessSCDType2Parallel",
+            lambda_function=self.data_movement_lambdas["scd_processor"],
+            output_path="$.Payload"
+        ).add_catch(error_state, errors=["States.ALL"])
+        
+        # Only tickets is SCD Type 2, so only create SCD task for tickets
+        scd_task_tickets = sfn_tasks.LambdaInvoke(
+            self,
+            "ProcessSCDType2Tickets",
+            lambda_function=self.data_movement_lambdas["scd_processor"],
+            output_path="$.Payload"
+        ).add_catch(error_state, errors=["States.ALL"])
+        
+        # Add error handling to tasks
         schema_init_with_catch = schema_init_task.add_catch(
             error_state,
             errors=["States.ALL"]
@@ -461,17 +518,32 @@ class ClickHouseStack(Stack):
             errors=["States.ALL"]
         )
         
-        scd_task_with_catch = scd_task.add_catch(
-            error_state,
-            errors=["States.ALL"]
+        # Add error handling to single table tasks
+        for table, task in single_table_tasks.items():
+            single_table_tasks[table] = task.add_catch(
+                error_state,
+                errors=["States.ALL"]
+            )
+        
+        # Configure Choice state conditions - Type 1 tables skip SCD processing
+        table_name_choice.when(
+            sfn.Condition.string_equals("$.table_name", "companies"),
+            single_table_tasks["companies"].next(success_state)  # Type 1: Skip SCD processing
+        ).when(
+            sfn.Condition.string_equals("$.table_name", "contacts"),
+            single_table_tasks["contacts"].next(success_state)  # Type 1: Skip SCD processing
+        ).when(
+            sfn.Condition.string_equals("$.table_name", "tickets"),
+            single_table_tasks["tickets"].next(scd_task_tickets.next(success_state))  # Type 2: Include SCD processing
+        ).when(
+            sfn.Condition.string_equals("$.table_name", "time_entries"),
+            single_table_tasks["time_entries"].next(success_state)  # Type 1: Skip SCD processing
+        ).otherwise(
+            parallel_loading_with_catch.next(scd_task_parallel.next(success_state))
         )
         
-        # Chain the states
-        definition = schema_init_with_catch.next(
-            parallel_loading_with_catch.next(
-                scd_task_with_catch.next(success_state)
-            )
-        )
+        # Chain the states: InitializeSchema -> CheckTableNameProvided -> [Single OR Parallel] -> SCD -> Success
+        definition = schema_init_with_catch.next(table_name_choice)
         
         # Create the state machine
         state_machine = sfn.StateMachine(
@@ -479,16 +551,7 @@ class ClickHouseStack(Stack):
             "ClickHouseDataPipeline",
             state_machine_name=f"clickhouse-data-pipeline-{self.env_name}",
             definition=definition,
-            role=self.step_functions_role,
-            logs=sfn.LogOptions(
-                destination=logs.LogGroup(
-                    self,
-                    "ClickHouseStateMachineLogGroup",
-                    log_group_name=f"/aws/stepfunctions/clickhouse-pipeline-{self.env_name}",
-                    retention=logs.RetentionDays.ONE_MONTH
-                ),
-                level=sfn.LogLevel.ALL
-            )
+            role=self.step_functions_role
         )
         
         return state_machine

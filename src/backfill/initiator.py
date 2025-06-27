@@ -30,7 +30,7 @@ BACKFILL_STATE_MACHINE_ARN = os.environ.get('BACKFILL_STATE_MACHINE_ARN')
 ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
 
 
-def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
+def lambda_handler(event: Dict[str, Any], _context) -> Dict[str, Any]:
     """
     Main Lambda handler for backfill initiation.
     

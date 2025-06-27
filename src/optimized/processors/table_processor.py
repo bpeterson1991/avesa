@@ -78,46 +78,22 @@ class TableProcessor:
             # Send table processing metrics
             self._send_table_metrics(job_id, tenant_id, table_name, 'started', chunk_plan['total_chunks'])
             
-            # Process chunks in parallel (Phase 2 implementation)
-            chunk_results = self._process_chunks_parallel(
-                table_config,
-                tenant_config,
-                chunk_plan,
-                job_id,
-                event.get('execution_id'),
-                event.get('force_full_sync', False)
-            )
-            
-            # Calculate final status and metrics
-            total_records_processed = sum(r.get('records_processed', 0) for r in chunk_results)
-            failed_chunks = [r for r in chunk_results if r.get('status') == 'failed']
-            
-            status = 'failed' if len(failed_chunks) == len(chunk_results) else \
-                    'partial_success' if failed_chunks else 'completed'
-            
-            # Update last updated timestamp if successful
-            if status in ['completed', 'partial_success']:
-                self._update_last_updated_timestamp(tenant_id, table_name)
-            
+            # Return chunk plan and table state for Step Functions orchestration
             result = {
                 'table_name': table_name,
                 'tenant_id': tenant_id,
-                'status': status,
-                'records_processed': total_records_processed,
-                'chunks_processed': len(chunk_results),
-                'chunk_results': chunk_results,
-                'chunk_plan': chunk_plan,  # Include chunk plan for Step Functions
-                'table_state': table_state,  # Include table state for Step Functions
+                'status': 'initialized',
+                'chunk_plan': chunk_plan,  # Step Functions will use this
+                'table_state': table_state,  # Step Functions will use this
                 'processing_time': self._calculate_processing_time(context),
-                'completed_at': get_timestamp()
+                'initialized_at': get_timestamp()
             }
             
             self.logger.info(
-                "Table processing completed",
+                "Table processing initialized",
                 job_id=job_id,
-                status=status,
-                records_processed=total_records_processed,
-                chunks_processed=len(chunk_results)
+                total_chunks=chunk_plan['total_chunks'],
+                estimated_records=chunk_plan['estimated_total_records']
             )
             
             return result
@@ -141,8 +117,8 @@ class TableProcessor:
             last_updated = self._get_last_updated_timestamp(tenant_id, table_name)
             
             # Determine if this is a full sync or incremental
-            force_full_sync = table_config.get('force_full_sync', False)
-            is_full_sync = force_full_sync or not last_updated
+            backfill_mode = table_config.get('backfill_mode', False)
+            is_full_sync = backfill_mode or not last_updated
             
             # Estimate total records (this would typically call the API to get count)
             estimated_total_records = self._estimate_total_records(table_config, is_full_sync)
@@ -190,48 +166,6 @@ class TableProcessor:
         except Exception as e:
             self.logger.warning(f"Failed to get last updated timestamp: {str(e)}")
             return None
-    
-    def _estimate_total_records(self, table_config: Dict[str, Any], is_full_sync: bool) -> int:
-        """
-        Estimate total records to be processed.
-        
-        In a real implementation, this would make an API call to get the actual count.
-        For now, we'll use estimates based on table type and sync mode.
-        """
-        table_name = table_config['table_name']
-        endpoint = table_config.get('endpoint', table_name)
-        
-        # Dynamic estimates based on canonical table types
-        try:
-            from utils import get_canonical_table_for_endpoint
-            
-            service_name = table_config.get('service_name', 'unknown')
-            canonical_table = get_canonical_table_for_endpoint(service_name, endpoint)
-            
-            # Base estimates for different canonical table types
-            canonical_estimates = {
-                'tickets': 10000,
-                'time_entries': 50000,
-                'companies': 2000,
-                'contacts': 8000,
-                'products': 5000,
-                'agreements': 1000,
-                'projects': 3000,
-                'members': 500
-            }
-            
-            base_estimate = canonical_estimates.get(canonical_table, 5000)
-            
-        except Exception as e:
-            self.logger.warning(f"Failed to get canonical table for estimation: {e}")
-            # Fallback to generic estimate
-            base_estimate = 5000
-        
-        if is_full_sync:
-            return base_estimate
-        else:
-            # Incremental sync typically processes 10-20% of total records
-            return int(base_estimate * 0.15)
     
     def _calculate_chunks(
         self,
@@ -314,7 +248,7 @@ class TableProcessor:
         
         # Dynamic complexity factors based on canonical table types
         try:
-            from utils import get_canonical_table_for_endpoint
+            from shared.utils import get_canonical_table_for_endpoint
             
             # Try to get canonical table for better complexity estimation
             canonical_table = None
@@ -373,7 +307,7 @@ class TableProcessor:
         """Calculate processing priority for chunk (1=highest, 10=lowest)."""
         # Dynamic priority based on canonical table types
         try:
-            from utils import get_canonical_table_for_endpoint
+            from shared.utils import get_canonical_table_for_endpoint
             
             # Try to get canonical table for better priority estimation
             canonical_table = None
@@ -408,213 +342,8 @@ class TableProcessor:
         else:
             return min(10, base_priority + 1)
     
-    def _process_chunks_parallel(self, table_config: Dict[str, Any],
-                               tenant_config: Dict[str, Any],
-                               chunk_plan: Dict[str, Any],
-                               job_id: str,
-                               execution_id: str,
-                               force_full_sync: bool) -> List[Dict[str, Any]]:
-        """Process chunks in parallel using Step Functions."""
-        try:
-            table_name = table_config['table_name']
-            tenant_id = tenant_config['tenant_id']
-            chunks = chunk_plan['chunks']
-            
-            # Initialize Step Functions client
-            stepfunctions = boto3.client('stepfunctions')
-            
-            # For Phase 2, we'll start with sequential processing
-            # This will be enhanced to parallel Step Functions execution in later phases
-            chunk_results = []
-            
-            for chunk_config in chunks:
-                try:
-                    result = self._process_single_chunk(
-                        table_config,
-                        tenant_config,
-                        chunk_config,
-                        job_id,
-                        execution_id,
-                        force_full_sync,
-                        stepfunctions
-                    )
-                    chunk_results.append(result)
-                    
-                except Exception as e:
-                    self.logger.error(
-                        f"Chunk processing failed: {chunk_config['chunk_id']}",
-                        error=str(e),
-                        tenant_id=tenant_id,
-                        table_name=table_name
-                    )
-                    chunk_results.append({
-                        'chunk_id': chunk_config['chunk_id'],
-                        'status': 'failed',
-                        'error': str(e),
-                        'records_processed': 0,
-                        'processing_time': 0,
-                        'completed_at': get_timestamp()
-                    })
-            
-            return chunk_results
-            
-        except Exception as e:
-            self.logger.error(f"Parallel chunk processing failed: {str(e)}")
-            raise
     
-    def _process_single_chunk(self, table_config: Dict[str, Any],
-                            tenant_config: Dict[str, Any],
-                            chunk_config: Dict[str, Any],
-                            job_id: str,
-                            execution_id: str,
-                            force_full_sync: bool,
-                            stepfunctions) -> Dict[str, Any]:
-        """Process a single chunk with dynamic service integration."""
-        try:
-            chunk_id = chunk_config['chunk_id']
-            table_name = table_config['table_name']
-            tenant_id = tenant_config['tenant_id']
-            
-            self.logger.info(
-                f"Processing chunk: {chunk_id}",
-                tenant_id=tenant_id,
-                table_name=table_name,
-                job_id=job_id
-            )
-            
-            # Create chunk processor input
-            chunk_processor_input = {
-                'tenant_config': tenant_config,
-                'table_config': table_config,
-                'chunk_config': chunk_config,
-                'job_id': job_id,
-                'execution_id': execution_id,
-                'force_full_sync': force_full_sync
-            }
-            
-            # For Phase 2, invoke the chunk processor Lambda directly
-            # In later phases, this will use Step Functions for parallel execution
-            chunk_processor_function_name = f"avesa-chunk-processor-{self.config.environment}"
-            
-            try:
-                # Initialize Lambda client
-                lambda_client = boto3.client('lambda')
-                
-                # Invoke chunk processor Lambda directly
-                response = lambda_client.invoke(
-                    FunctionName=chunk_processor_function_name,
-                    InvocationType='RequestResponse',
-                    Payload=json.dumps(chunk_processor_input)
-                )
-                
-                # Parse response
-                payload = response['Payload'].read()
-                result = json.loads(payload)
-                
-                # Check for Lambda execution errors
-                if response.get('FunctionError'):
-                    error_message = result.get('errorMessage', 'Unknown Lambda error')
-                    raise Exception(f"Chunk processor Lambda failed: {error_message}")
-                
-                return result
-                
-            except Exception as e:
-                # Fallback to simulated processing if Lambda invocation fails
-                self.logger.warning(f"Chunk processor Lambda invocation failed, using fallback: {str(e)}")
-                return self._simulate_chunk_processing(chunk_config)
-            
-        except Exception as e:
-            self.logger.error(
-                f"Chunk processing failed: {chunk_config['chunk_id']}",
-                error=str(e)
-            )
-            raise
     
-    def _wait_for_chunk_completion(self, execution_arn: str, stepfunctions, timeout_seconds: int = 300) -> Dict[str, Any]:
-        """Wait for chunk processor Step Functions execution to complete."""
-        import time
-        
-        start_time = time.time()
-        
-        while time.time() - start_time < timeout_seconds:
-            try:
-                response = stepfunctions.describe_execution(executionArn=execution_arn)
-                status = response['status']
-                
-                if status == 'SUCCEEDED':
-                    output = json.loads(response.get('output', '{}'))
-                    return output
-                elif status == 'FAILED':
-                    error = response.get('error', 'Unknown error')
-                    cause = response.get('cause', 'Unknown cause')
-                    raise Exception(f"Chunk processing failed: {error} - {cause}")
-                elif status in ['ABORTED', 'TIMED_OUT']:
-                    raise Exception(f"Chunk processing {status.lower()}")
-                
-                # Still running, wait a bit
-                time.sleep(2)
-                
-            except Exception as e:
-                if "execution does not exist" in str(e).lower():
-                    raise Exception("Chunk processor execution not found")
-                raise
-        
-        # Timeout reached
-        raise Exception(f"Chunk processing timed out after {timeout_seconds} seconds")
-    
-    def _simulate_chunk_processing(self, chunk_config: Dict[str, Any]) -> Dict[str, Any]:
-        """Simulate chunk processing for testing purposes."""
-        import time
-        import random
-        
-        chunk_id = chunk_config['chunk_id']
-        estimated_records = chunk_config['estimated_records']
-        
-        # Get processing complexity based on canonical table if available
-        try:
-            from utils import get_canonical_table_for_endpoint
-            
-            if hasattr(self, '_current_table_config'):
-                service_name = self._current_table_config.get('service_name', 'unknown')
-                endpoint = self._current_table_config.get('endpoint', '')
-                canonical_table = get_canonical_table_for_endpoint(service_name, endpoint)
-                
-                # Processing complexity factors for simulation
-                canonical_complexity = {
-                    'tickets': 1.5,      # More complex processing
-                    'time_entries': 1.0, # Standard processing
-                    'companies': 1.2,    # Medium complexity
-                    'contacts': 1.1,     # Slightly complex
-                    'products': 0.9,     # Simple processing
-                    'agreements': 1.3,   # Medium complexity
-                    'projects': 1.4,     # Complex processing
-                    'members': 0.8       # Simple processing
-                }
-                
-                complexity_factor = canonical_complexity.get(canonical_table, 1.0)
-            else:
-                complexity_factor = 1.0
-                
-        except Exception as e:
-            self.logger.warning(f"Failed to get canonical complexity for simulation: {e}")
-            complexity_factor = 1.0
-        
-        # Simulate processing time based on chunk size and complexity
-        base_time = random.uniform(0.5, 2.0) * (estimated_records / 1000)
-        processing_time = base_time * complexity_factor
-        time.sleep(min(processing_time, 5.0))  # Cap at 5 seconds for testing
-        
-        # Simulate some variance in actual records processed
-        variance = random.uniform(0.8, 1.2)
-        records_processed = int(estimated_records * variance)
-        
-        return {
-            'chunk_id': chunk_id,
-            'status': 'completed',
-            'records_processed': records_processed,
-            'processing_time': processing_time,
-            'completed_at': get_timestamp()
-        }
     
     def _update_last_updated_timestamp(self, tenant_id: str, table_name: str):
         """Update last updated timestamp for incremental processing."""

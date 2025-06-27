@@ -35,7 +35,7 @@ def cleanup_expired_records(client, table_name: str, retention_days: int = 2555)
         AND expiration_date < '{cutoff_date.isoformat()}'
         """
         
-        expired_count = client.query(count_query).result_rows[0][0]
+        expired_count = client.execute_query(count_query).result_rows[0][0]
         
         if expired_count > 0:
             # Delete expired records
@@ -45,7 +45,7 @@ def cleanup_expired_records(client, table_name: str, retention_days: int = 2555)
             AND expiration_date < '{cutoff_date.isoformat()}'
             """
             
-            client.command(delete_query)
+            client.execute_command(delete_query)
             logger.info(f"Deleted {expired_count} expired records from {table_name}")
         
         return {
@@ -76,7 +76,7 @@ def validate_scd_integrity(client, table_name: str) -> Dict[str, Any]:
         HAVING count() > 1
         """
         
-        overlaps = client.query(overlap_query).result_rows
+        overlaps = client.execute_query(overlap_query).result_rows
         validation_results['overlapping_current_records'] = len(overlaps)
         
         # Check for records without proper expiration
@@ -87,7 +87,7 @@ def validate_scd_integrity(client, table_name: str) -> Dict[str, Any]:
         AND expiration_date IS NULL
         """
         
-        orphan_count = client.query(orphan_query).result_rows[0][0]
+        orphan_count = client.execute_query(orphan_query).result_rows[0][0]
         validation_results['orphaned_records'] = orphan_count
         
         # Check for future effective dates
@@ -97,7 +97,7 @@ def validate_scd_integrity(client, table_name: str) -> Dict[str, Any]:
         WHERE effective_date > now()
         """
         
-        future_count = client.query(future_query).result_rows[0][0]
+        future_count = client.execute_query(future_query).result_rows[0][0]
         validation_results['future_effective_dates'] = future_count
         
         # Check for invalid date ranges
@@ -108,7 +108,7 @@ def validate_scd_integrity(client, table_name: str) -> Dict[str, Any]:
         AND expiration_date <= effective_date
         """
         
-        invalid_range_count = client.query(invalid_range_query).result_rows[0][0]
+        invalid_range_count = client.execute_query(invalid_range_query).result_rows[0][0]
         validation_results['invalid_date_ranges'] = invalid_range_count
         
         # Calculate overall health score
@@ -148,7 +148,7 @@ def fix_scd_issues(client, table_name: str) -> Dict[str, Any]:
         AND expiration_date IS NULL
         """
         
-        client.command(orphan_fix_query)
+        client.execute_command(orphan_fix_query)
         fixes_applied.append('fixed_orphaned_records')
         
         # Fix overlapping current records (keep the latest one)
@@ -166,7 +166,7 @@ def fix_scd_issues(client, table_name: str) -> Dict[str, Any]:
         )
         """
         
-        client.command(overlap_fix_query)
+        client.execute_command(overlap_fix_query)
         fixes_applied.append('fixed_overlapping_current_records')
         
         logger.info(f"Applied SCD fixes for {table_name}: {fixes_applied}")
@@ -191,11 +191,11 @@ def generate_scd_statistics(client, table_name: str) -> Dict[str, Any]:
         
         # Total records
         total_query = f"SELECT count() as total FROM {table_name}"
-        stats['total_records'] = client.query(total_query).result_rows[0][0]
+        stats['total_records'] = client.execute_query(total_query).result_rows[0][0]
         
         # Current records
         current_query = f"SELECT count() as current FROM {table_name} WHERE is_current = true"
-        stats['current_records'] = client.query(current_query).result_rows[0][0]
+        stats['current_records'] = client.execute_query(current_query).result_rows[0][0]
         
         # Historical records
         stats['historical_records'] = stats['total_records'] - stats['current_records']
@@ -208,7 +208,7 @@ def generate_scd_statistics(client, table_name: str) -> Dict[str, Any]:
         ORDER BY records DESC
         """
         
-        tenant_stats = client.query(tenant_query).result_rows
+        tenant_stats = client.execute_query(tenant_query).result_rows
         stats['tenant_breakdown'] = [
             {
                 'tenant_id': row[0],
@@ -228,7 +228,7 @@ def generate_scd_statistics(client, table_name: str) -> Dict[str, Any]:
         ORDER BY record_version
         """
         
-        version_stats = client.query(version_query).result_rows
+        version_stats = client.execute_query(version_query).result_rows
         stats['version_distribution'] = [
             {'version': row[0], 'count': row[1]}
             for row in version_stats

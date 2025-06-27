@@ -7,6 +7,7 @@ from aws_cdk import (
     Stack,
     Duration,
     RemovalPolicy,
+    BundlingOptions,
     aws_lambda as _lambda,
     aws_dynamodb as dynamodb,
     aws_iam as iam,
@@ -31,7 +32,7 @@ class BackfillStack(Stack):
         data_bucket_name: str,
         tenant_services_table_name: str,
         lambda_memory: int = 1024,
-        lambda_timeout: int = 900,
+        lambda_timeout: int = 180,
         **kwargs
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -156,7 +157,17 @@ class BackfillStack(Stack):
             function_name=f"avesa-backfill-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="lambda_function.lambda_handler",
-            code=_lambda.Code.from_asset("../src/backfill"),
+            code=_lambda.Code.from_asset(
+                "../src",
+                bundling=BundlingOptions(
+                    image=_lambda.Runtime.PYTHON_3_9.bundling_image,
+                    command=[
+                        "bash", "-c",
+                        "cp -r /asset-input/backfill/* /asset-output/ && "
+                        "cp -r /asset-input/shared /asset-output/"
+                    ]
+                )
+            ),
             role=self.backfill_lambda_role,
             memory_size=memory,
             timeout=Duration.seconds(timeout),
@@ -183,10 +194,20 @@ class BackfillStack(Stack):
             function_name=f"avesa-backfill-initiator-{self.env_name}",
             runtime=_lambda.Runtime.PYTHON_3_9,
             handler="initiator.lambda_handler",
-            code=_lambda.Code.from_asset("../src/backfill"),
+            code=_lambda.Code.from_asset(
+                "../src",
+                bundling=BundlingOptions(
+                    image=_lambda.Runtime.PYTHON_3_9.bundling_image,
+                    command=[
+                        "bash", "-c",
+                        "cp -r /asset-input/backfill/* /asset-output/ && "
+                        "cp -r /asset-input/shared /asset-output/"
+                    ]
+                )
+            ),
             role=self.backfill_lambda_role,
             memory_size=512,
-            timeout=Duration.seconds(300),
+            timeout=Duration.seconds(180),
             environment={
                 "BUCKET_NAME": self.data_bucket_name,
                 "TENANT_SERVICES_TABLE": self.tenant_services_table_name,
@@ -262,26 +283,13 @@ class BackfillStack(Stack):
             )
         )
 
-        # Create log group for state machine
-        log_group = logs.LogGroup(
-            self,
-            "BackfillStateMachineLogs",
-            log_group_name=f"/aws/stepfunctions/BackfillOrchestrator-{self.env_name}",
-            retention=logs.RetentionDays.ONE_MONTH,
-            removal_policy=RemovalPolicy.DESTROY
-        )
-
         # Create the state machine
         state_machine = sfn.StateMachine(
             self,
             "BackfillOrchestrator",
             state_machine_name=f"BackfillOrchestrator-{self.env_name}",
             definition=definition,
-            timeout=Duration.hours(24),  # Max 24 hours for backfill
-            logs=sfn.LogOptions(
-                destination=log_group,
-                level=sfn.LogLevel.ALL
-            )
+            timeout=Duration.hours(24)  # Max 24 hours for backfill
         )
 
         # Note: Permissions will be granted after stack creation to avoid circular dependency

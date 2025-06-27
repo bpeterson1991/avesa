@@ -17,6 +17,8 @@ from clickhouse_connect.driver.client import Client
 # Add shared modules to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
 
+from canonical_schema import CanonicalSchemaManager, CanonicalFieldTypeMapper
+
 class DynamicClickHouseSchemaManager:
     """Manage ClickHouse schemas dynamically from canonical mappings"""
     
@@ -34,130 +36,29 @@ class DynamicClickHouseSchemaManager:
             self.mappings_dir = os.path.join(project_root, 'mappings', 'canonical')
     
     def load_canonical_mapping(self, table_name: str) -> Dict[str, Any]:
-        """Load canonical mapping for a table"""
-        mapping_file = os.path.join(self.mappings_dir, f"{table_name}.json")
-        
-        if not os.path.exists(mapping_file):
-            raise FileNotFoundError(f"Canonical mapping not found: {mapping_file}")
-            
-        with open(mapping_file, 'r') as f:
-            return json.load(f)
+        """Load canonical mapping for a table using shared schema manager"""
+        return CanonicalSchemaManager.load_canonical_mapping(table_name, self.mappings_dir)
     
     def extract_canonical_fields(self, mapping: Dict[str, Any]) -> Set[str]:
-        """Extract all canonical field names from mapping"""
-        fields = set()
-        
-        # Skip scd_type key
-        for service_name, service_mapping in mapping.items():
-            if service_name == 'scd_type':
-                continue
-                
-            if isinstance(service_mapping, dict):
-                for endpoint_path, field_mappings in service_mapping.items():
-                    if isinstance(field_mappings, dict):
-                        # The keys are the canonical field names
-                        fields.update(field_mappings.keys())
-        
-        return fields
+        """Extract all canonical field names from mapping using shared schema manager"""
+        return CanonicalSchemaManager.extract_canonical_fields(mapping)
     
-    def determine_clickhouse_type(self, field_name: str) -> str:
-        """Determine appropriate ClickHouse type for a field"""
-        
-        # Required fields (non-nullable)
-        required_fields = {
-            'tenant_id': 'String',
-            'id': 'String',
-            'company_name': 'String',
-            'ingestion_timestamp': 'DateTime DEFAULT now()',
-            'record_hash': 'String',
-            'source_table': 'String',
-            'updated_date': 'DateTime DEFAULT now()'
-        }
-        
-        # Check required fields first
-        if field_name in required_fields:
-            return required_fields[field_name]
-        
-        # Type mappings for specific fields
-        type_mappings = {
-            # Date fields
-            'date_acquired': 'Nullable(Date)',
-            'birth_day': 'Nullable(Date)',
-            'anniversary': 'Nullable(Date)',
-            'created_date': 'DateTime',
-            'closed_date': 'Nullable(DateTime)',
-            'required_date': 'Nullable(DateTime)',
-            'time_start': 'Nullable(DateTime)',
-            'time_end': 'Nullable(DateTime)',
-            'date_entered': 'DateTime',
-            'last_updated': 'DateTime',
-            'effective_start_date': 'DateTime DEFAULT now()',
-            'effective_end_date': 'Nullable(DateTime)',
-            
-            # Boolean fields
-            'lead_flag': 'Nullable(Bool)',
-            'unsubscribe_flag': 'Nullable(Bool)',
-            'married_flag': 'Nullable(Bool)',
-            'children_flag': 'Nullable(Bool)',
-            'disable_portal_login_flag': 'Nullable(Bool)',
-            'inactive_flag': 'Nullable(Bool)',
-            'approved': 'Nullable(Bool)',
-            'is_current': 'Bool DEFAULT true',
-            
-            # Numeric fields
-            'annual_revenue': 'Nullable(Float64)',
-            'number_of_employees': 'Nullable(UInt32)',
-            'budget_hours': 'Nullable(Float64)',
-            'actual_hours': 'Nullable(Float64)',
-            'hours_deduct': 'Nullable(Float64)',
-        }
-        
-        # Check exact match first
-        if field_name in type_mappings:
-            return type_mappings[field_name]
-        
-        # Pattern-based matching
-        if field_name.endswith('_id'):
-            return 'Nullable(String)'
-        elif field_name.endswith('_flag'):
-            return 'Nullable(Bool)'
-        elif field_name.endswith('_date'):
-            return 'Nullable(DateTime)'
-        elif field_name.endswith('_hours'):
-            return 'Nullable(Float64)'
-        elif field_name.endswith('_count'):
-            return 'Nullable(UInt32)'
-        elif 'revenue' in field_name or 'amount' in field_name:
-            return 'Nullable(Float64)'
-        elif 'number' in field_name and 'phone' not in field_name:
-            return 'Nullable(UInt32)'
-        else:
-            # Default to nullable string
-            return 'Nullable(String)'
+    def determine_clickhouse_type(self, field_name: str, mapping: Dict[str, Any] = None) -> str:
+        """Determine appropriate ClickHouse type for a field using shared field type mapper"""
+        return CanonicalFieldTypeMapper.determine_clickhouse_type(field_name, mapping)
     
     def get_scd_type(self, mapping: Dict[str, Any]) -> str:
-        """Get SCD type from mapping"""
-        return mapping.get('scd_type', 'type_1')
+        """Get SCD type from mapping using shared schema manager"""
+        return CanonicalSchemaManager.get_scd_type(mapping)
     
     def get_table_fields(self, table_name: str) -> List[str]:
-        """Get list of fields for a table"""
+        """Get list of fields for a table using shared schema manager"""
         mapping = self.load_canonical_mapping(table_name)
         canonical_fields = self.extract_canonical_fields(mapping)
         scd_type = self.get_scd_type(mapping)
         
-        # Required metadata fields
-        required_fields = {
-            'tenant_id', 'id', 'ingestion_timestamp', 'record_hash', 
-            'source_table', 'updated_date'
-        }
-        
-        # Add SCD Type 2 fields if needed
-        if scd_type == 'type_2':
-            required_fields.update(['effective_start_date', 'effective_end_date', 'is_current'])
-        
-        # Combine and sort
-        all_fields = canonical_fields.union(required_fields)
-        return sorted(all_fields)
+        # Use shared schema manager for consistent field definitions
+        return CanonicalSchemaManager.get_complete_schema(table_name, canonical_fields, scd_type)
     
     def table_exists(self, table_name: str) -> bool:
         """Check if table exists in ClickHouse"""
@@ -177,52 +78,105 @@ class DynamicClickHouseSchemaManager:
         except Exception:
             return set()
     
-    def create_table_from_mapping(self, table_name: str) -> bool:
-        """Create ClickHouse table from canonical mapping"""
-        try:
-            print(f"Creating table {table_name} from canonical mapping...")
+    def generate_ordered_table_schema(self, table_name: str) -> str:
+        """
+        Generate CREATE TABLE statement with fields in mapping file order.
+        
+        This ensures perfect column ordering alignment between mapping files
+        and ClickHouse table schemas for consistency and maintainability.
+        
+        Args:
+            table_name: Name of the canonical table
             
+        Returns:
+            Complete CREATE TABLE SQL statement
+        """
+        try:
             # Load canonical mapping
             mapping = self.load_canonical_mapping(table_name)
-            
-            # Extract canonical fields
-            canonical_fields = self.extract_canonical_fields(mapping)
             
             # Get SCD type
             scd_type = self.get_scd_type(mapping)
             
-            # Required metadata fields
-            required_fields = {
-                'tenant_id', 'id', 'ingestion_timestamp', 'record_hash', 
-                'source_table', 'updated_date'
-            }
+            # Extract field types in order from mapping
+            field_types = mapping.get('field_types', {})
             
-            # Add SCD Type 2 fields if needed
-            if scd_type == 'type_2':
-                required_fields.update(['effective_start_date', 'effective_end_date', 'is_current'])
+            # Get metadata fields that should be appended
+            metadata_fields = CanonicalSchemaManager.get_standard_metadata_fields(scd_type)
             
-            # Combine canonical and required fields
-            all_fields = canonical_fields.union(required_fields)
-            
-            print(f"  Fields: {len(all_fields)} total ({len(canonical_fields)} canonical + {len(required_fields)} metadata)")
+            print(f"Generating ordered schema for {table_name}:")
+            print(f"  Business fields: {len(field_types)} (from mapping file order)")
+            print(f"  Metadata fields: {len(metadata_fields)} (appended)")
             print(f"  SCD Type: {scd_type}")
             
-            # Generate CREATE TABLE statement
+            # Build field definitions respecting mapping file order
             field_definitions = []
             
-            # Sort fields for consistent output
-            sorted_fields = sorted(all_fields)
-            
-            for field_name in sorted_fields:
-                field_type = self.determine_clickhouse_type(field_name)
+            # 1. Add business fields in mapping file order
+            for field_name, field_type in field_types.items():
                 field_definitions.append(f"    {field_name} {field_type}")
             
-            create_sql = f"""
+            # 2. Add metadata fields (always at end)
+            for field_name in metadata_fields:
+                field_type = self.determine_clickhouse_type(field_name, mapping)
+                field_definitions.append(f"    {field_name} {field_type}")
+            
+            # Generate CREATE TABLE statement
+            create_sql = f"""CREATE TABLE IF NOT EXISTS {table_name} (
+{',\n'.join(field_definitions)}
+)
+ENGINE = ReplacingMergeTree(last_updated)
+ORDER BY (tenant_id, id, last_updated)
+SETTINGS index_granularity = 8192"""
+            
+            return create_sql
+            
+        except Exception as e:
+            print(f"❌ Failed to generate ordered schema for {table_name}: {e}")
+            raise
+
+    def create_table_from_mapping(self, table_name: str, use_ordered_schema: bool = False) -> bool:
+        """Create ClickHouse table from canonical mapping"""
+        try:
+            print(f"Creating table {table_name} from canonical mapping...")
+            
+            if use_ordered_schema:
+                # Use new ordered schema generation
+                create_sql = self.generate_ordered_table_schema(table_name)
+            else:
+                # Legacy schema generation (alphabetical order)
+                # Load canonical mapping
+                mapping = self.load_canonical_mapping(table_name)
+                
+                # Extract canonical fields
+                canonical_fields = self.extract_canonical_fields(mapping)
+                
+                # Get SCD type
+                scd_type = self.get_scd_type(mapping)
+                
+                # Use shared schema manager for consistent field definitions
+                all_fields = set(CanonicalSchemaManager.get_complete_schema(table_name, canonical_fields, scd_type))
+                
+                metadata_fields = CanonicalSchemaManager.get_standard_metadata_fields(scd_type)
+                print(f"  Fields: {len(all_fields)} total ({len(canonical_fields)} canonical + {len(metadata_fields)} metadata)")
+                print(f"  SCD Type: {scd_type}")
+                
+                # Generate CREATE TABLE statement
+                field_definitions = []
+                
+                # Sort fields for consistent output
+                sorted_fields = sorted(all_fields)
+                
+                for field_name in sorted_fields:
+                    field_type = self.determine_clickhouse_type(field_name, mapping)
+                    field_definitions.append(f"    {field_name} {field_type}")
+                
+                create_sql = f"""
 CREATE TABLE IF NOT EXISTS {table_name} (
 {',\n'.join(field_definitions)}
 )
-ENGINE = MergeTree()
-ORDER BY (tenant_id, id, {'effective_start_date' if scd_type == 'type_2' else 'updated_date'})
+ENGINE = ReplacingMergeTree(last_updated)
+ORDER BY (tenant_id, id, last_updated)
 SETTINGS index_granularity = 8192
 """
             
@@ -233,6 +187,55 @@ SETTINGS index_granularity = 8192
             
         except Exception as e:
             print(f"❌ Failed to create table {table_name}: {e}")
+            return False
+
+    def drop_table(self, table_name: str) -> bool:
+        """
+        Drop ClickHouse table.
+        
+        Args:
+            table_name: Name of the table to drop
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            print(f"Dropping table {table_name}...")
+            drop_sql = f"DROP TABLE IF EXISTS {table_name}"
+            self.client.query(drop_sql)
+            print(f"✅ Successfully dropped table {table_name}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Failed to drop table {table_name}: {e}")
+            return False
+
+    def recreate_table_with_ordered_schema(self, table_name: str) -> bool:
+        """
+        Drop and recreate table with perfect column ordering from mapping file.
+        
+        Args:
+            table_name: Name of the table to recreate
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            print(f"=== RECREATING TABLE {table_name.upper()} WITH ORDERED SCHEMA ===")
+            
+            # Step 1: Drop existing table
+            if not self.drop_table(table_name):
+                return False
+                
+            # Step 2: Create table with ordered schema
+            if not self.create_table_from_mapping(table_name, use_ordered_schema=True):
+                return False
+                
+            print(f"✅ Successfully recreated {table_name} with perfect column ordering")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Failed to recreate table {table_name}: {e}")
             return False
     
     def update_table_schema(self, table_name: str) -> bool:
@@ -256,8 +259,9 @@ SETTINGS index_granularity = 8192
             print(f"  Adding {len(missing_fields)} missing fields: {sorted(missing_fields)}")
             
             # Add missing columns
+            mapping = self.load_canonical_mapping(table_name)
             for field_name in sorted(missing_fields):
-                field_type = self.determine_clickhouse_type(field_name)
+                field_type = self.determine_clickhouse_type(field_name, mapping)
                 alter_sql = f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {field_name} {field_type}"
                 
                 try:

@@ -48,6 +48,7 @@ except ImportError as e:
 # Initialize clients using shared factory
 from shared import AWSClientFactory, CanonicalMapper
 from shared.scd_config import SCDConfigManager, get_scd_type, is_scd_type_1, is_scd_type_2
+from shared.canonical_schema import CanonicalSchemaManager
 aws_factory = AWSClientFactory()
 clients = aws_factory.get_client_bundle(['dynamodb', 's3'])
 dynamodb = clients['dynamodb']
@@ -70,6 +71,34 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         Execution summary
     """
     logger = PipelineLogger("canonical_transform")
+    
+    # Phase 3 enhancement: Check for specific source files
+    source_files = event.get('source_files')  # List of specific S3 keys
+    aggregator_triggered = event.get('aggregator_triggered', False)
+    processing_mode = 'file_specific' if source_files else 'time_based'
+    
+    # DIAGNOSTIC: Log the incoming event to understand triggering pattern
+    logger.info(f"🔍 CANONICAL TRANSFORM DEBUG: Lambda triggered",
+               event_keys=list(event.keys()),
+               has_source_s3_key=bool(event.get('source_s3_key')),
+               has_tenant_id=bool(event.get('tenant_id')),
+               has_table_name=bool(event.get('table_name')),
+               has_s3_trigger=bool(event.get('s3_trigger')),
+               processing_mode=processing_mode,
+               source_files_count=len(source_files) if source_files else 0,
+               aggregator_triggered=aggregator_triggered,
+               aws_request_id=context.aws_request_id)
+    
+    if event.get('source_s3_key'):
+        logger.info(f"🔍 CANONICAL TRANSFORM DEBUG: S3-triggered processing",
+                   source_s3_key=event['source_s3_key'],
+                   service_name=event.get('service_name'),
+                   table_name=event.get('table_name'))
+    
+    if source_files:
+        logger.info(f"🔍 CANONICAL TRANSFORM DEBUG: File-specific processing mode",
+                   source_files=source_files[:5],  # Log first 5 files
+                   total_files=len(source_files))
     
     # Get environment configuration using proper pattern
     from shared.environment import Environment
@@ -108,7 +137,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     config=config,
                     tenant_id=tenant_id,
                     canonical_table=canonical_table,
-                    logger=tenant_logger
+                    logger=tenant_logger,
+                    source_files=source_files
                 )
                 results.append(result)
                 
@@ -183,7 +213,8 @@ def process_tenant_canonical_data(
     config: Config,
     tenant_id: str,
     canonical_table: str,
-    logger: PipelineLogger
+    logger: PipelineLogger,
+    source_files: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """Process canonical transformation for a single tenant."""
     start_time = datetime.now()
@@ -191,8 +222,14 @@ def process_tenant_canonical_data(
     try:
         logger.info(f"Starting canonical transformation for tenant {tenant_id}, table {canonical_table}")
         
-        # Find raw data files to process
-        raw_files = find_raw_data_files(config, tenant_id, canonical_table, logger)
+        # Find raw data files to process (Phase 3 enhancement: use specific files if provided)
+        if source_files:
+            # Use specific files provided by result aggregator
+            raw_files = source_files
+            logger.info(f"Using {len(raw_files)} specific source files provided by result aggregator")
+        else:
+            # Use traditional time-based file discovery
+            raw_files = find_raw_data_files(config, tenant_id, canonical_table, logger)
         
         if not raw_files:
             logger.info(f"No raw data files found for transformation")
@@ -277,7 +314,7 @@ def process_tenant_canonical_data(
         
         # Write canonical data to S3
         timestamp = get_timestamp()
-        s3_key = f"{tenant_id}/canonical/{canonical_table}/{timestamp}.parquet"
+        s3_key = f"{tenant_id}/canonical/{canonical_table}/{tenant_id}-{timestamp}.parquet"
         
         write_canonical_data_to_s3(config, s3_key, scd_records, logger)
         
@@ -317,10 +354,13 @@ def process_tenant_canonical_data(
 def check_if_files_already_processed(config: Config, tenant_id: str, canonical_table: str, raw_files: List[str], logger: PipelineLogger) -> bool:
     """Check if the current batch of raw files has already been processed."""
     if not raw_files:
+        logger.info("🔍 IDEMPOTENCY: No raw files provided, returning True")
         return True
     
     try:
         # Get the last processed timestamp for this tenant/table
+        logger.info(f"🔍 IDEMPOTENCY: Checking last processed timestamp for {tenant_id}/canonical_{canonical_table}")
+        
         response = dynamodb.get_item(
             TableName=config.last_updated_table,
             Key={
@@ -330,34 +370,44 @@ def check_if_files_already_processed(config: Config, tenant_id: str, canonical_t
         )
         
         if 'Item' not in response:
+            logger.info("🔍 IDEMPOTENCY: No previous processing record found - proceeding with processing")
             return False  # Never processed before
         
         last_processed = response['Item'].get('last_updated', {}).get('S')
         if not last_processed:
+            logger.info("🔍 IDEMPOTENCY: No last_updated timestamp found - proceeding with processing")
             return False
         
         # Parse last processed timestamp
         last_processed_dt = datetime.fromisoformat(last_processed.replace('Z', '+00:00'))
+        logger.info(f"🔍 IDEMPOTENCY: Last processed at: {last_processed_dt}")
         
         # Check if any raw files are newer than last processed timestamp
+        newer_files_found = 0
         for file_key in raw_files:
             try:
                 # Get file metadata
                 file_response = s3.head_object(Bucket=config.bucket_name, Key=file_key)
                 file_modified = file_response['LastModified']
                 
+                logger.debug(f"🔍 IDEMPOTENCY: File {file_key} modified at {file_modified}")
+                
                 if file_modified > last_processed_dt:
-                    logger.info(f"Found newer raw file: {file_key} modified {file_modified}")
-                    return False  # Found newer data
+                    logger.info(f"🔍 IDEMPOTENCY: Found newer raw file: {file_key} modified {file_modified} (newer than {last_processed_dt})")
+                    newer_files_found += 1
             except Exception as e:
-                logger.warning(f"Could not check file {file_key}: {e}")
+                logger.warning(f"🔍 IDEMPOTENCY: Could not check file {file_key}: {e} - assuming needs processing")
                 return False  # Assume not processed on error
         
-        logger.info(f"All raw files for {tenant_id}/{canonical_table} already processed")
+        if newer_files_found > 0:
+            logger.info(f"🔍 IDEMPOTENCY: Found {newer_files_found} newer files - proceeding with processing")
+            return False  # Found newer data
+        
+        logger.info(f"🔍 IDEMPOTENCY: All {len(raw_files)} raw files for {tenant_id}/{canonical_table} already processed")
         return True  # All files already processed
         
     except Exception as e:
-        logger.error(f"Error checking processing status: {e}")
+        logger.error(f"🔍 IDEMPOTENCY: Error checking processing status: {e} - assuming needs processing")
         return False  # Assume not processed on error
 
 def update_processing_timestamp(config: Config, tenant_id: str, canonical_table: str, logger: PipelineLogger):
@@ -426,24 +476,48 @@ def load_and_transform_raw_data(config: Config, s3_key: str, canonical_table: st
     """Load raw data and transform to canonical format."""
     import pandas as pd
     import json
+    import time
+    import io
     
     try:
-        # Read raw data from S3
-        response = s3.get_object(Bucket=config.bucket_name, Key=s3_key)
+        # Read raw data from S3 with enhanced retry logic
+        df = None
+        max_retries = 3
+        base_delay = 2
         
-        # Check if file is JSON or parquet based on extension
-        if s3_key.endswith('.json'):
-            # Read JSON data
-            raw_data = json.loads(response['Body'].read().decode('utf-8'))
-            
-            # Convert to DataFrame - handle both single objects and arrays
-            if isinstance(raw_data, list):
-                df = pd.DataFrame(raw_data)
-            else:
-                df = pd.DataFrame([raw_data])
-        else:
-            # Read parquet data
-            df = pd.read_parquet(response['Body'])
+        for attempt in range(max_retries + 1):
+            try:
+                # Get fresh S3 response object for each attempt
+                response = s3.get_object(Bucket=config.bucket_name, Key=s3_key)
+                
+                # Read body into memory first to avoid stream positioning issues
+                body_data = response['Body'].read()
+                body_stream = io.BytesIO(body_data)
+                
+                # Read parquet from memory stream
+                df = pd.read_parquet(body_stream)
+                
+                if attempt > 0:
+                    logger.info(f"Successfully read parquet file on retry attempt {attempt + 1}")
+                break
+                
+            except Exception as parquet_error:
+                error_msg = str(parquet_error)
+                
+                # If this is our last attempt, raise the error
+                if attempt >= max_retries:
+                    logger.error(f"Failed to read parquet file after {max_retries + 1} attempts: {error_msg}")
+                    raise parquet_error
+                
+                # Log retry attempt
+                logger.warning(f"S3 read attempt {attempt + 1} failed: {error_msg} - retrying")
+                
+                # Exponential backoff delay
+                delay = base_delay * (2 ** attempt)
+                time.sleep(delay)
+        
+        if df is None:
+            raise Exception("Failed to read parquet file after all retry attempts")
         
         if df.empty:
             return []
@@ -457,7 +531,7 @@ def load_and_transform_raw_data(config: Config, s3_key: str, canonical_table: st
         tenant_id = s3_key.split('/')[0] if '/' in s3_key else None
         
         for _, row in df.iterrows():
-            transformed_record = transform_record(row.to_dict(), mapping, canonical_table, tenant_id)
+            transformed_record = transform_record(row.to_dict(), mapping, canonical_table, tenant_id, logger)
             if transformed_record:
                 transformed_records.append(transformed_record)
         
@@ -476,7 +550,7 @@ def load_canonical_mapping(canonical_table: str) -> Dict[str, Any]:
     return canonical_mapper.load_mapping(canonical_table, bucket=bucket_name)
 
 
-def transform_record(raw_record: Dict[str, Any], mapping: Dict[str, Any], canonical_table: str, tenant_id: str = None) -> Optional[Dict[str, Any]]:
+def transform_record(raw_record: Dict[str, Any], mapping: Dict[str, Any], canonical_table: str, tenant_id: str = None, logger: PipelineLogger = None) -> Optional[Dict[str, Any]]:
     """Transform a single record to canonical format using shared CanonicalMapper with emergency validation."""
     transformed_record = canonical_mapper.transform_record(raw_record, mapping, canonical_table)
     
@@ -484,7 +558,6 @@ def transform_record(raw_record: Dict[str, Any], mapping: Dict[str, Any], canoni
     if transformed_record and tenant_id:
         transformed_record['tenant_id'] = tenant_id
     
-    # EMERGENCY DATA CORRUPTION PREVENTION
     if transformed_record:
         # Validate that business fields are present (not just metadata)
         business_fields = get_required_business_fields(canonical_table)
@@ -495,10 +568,11 @@ def transform_record(raw_record: Dict[str, Any], mapping: Dict[str, Any], canoni
                 missing_fields.append(field)
         
         if missing_fields:
-            logger.error(f"EMERGENCY HALT: Missing critical business fields {missing_fields} in {canonical_table}")
-            logger.error(f"Raw record keys: {list(raw_record.keys())}")
-            logger.error(f"Transformed record keys: {list(transformed_record.keys())}")
-            logger.error(f"Mapping fields: {mapping.get('fields', {})}")
+            if logger:
+                logger.error(f"EMERGENCY HALT: Missing critical business fields {missing_fields} in {canonical_table}")
+                logger.error(f"Raw record keys: {list(raw_record.keys())}")
+                logger.error(f"Transformed record keys: {list(transformed_record.keys())}")
+                logger.error(f"Mapping fields: {mapping.get('fields', {})}")
             
             # CIRCUIT BREAKER: Return None to prevent writing metadata-only records
             return None
@@ -509,7 +583,7 @@ def transform_record(raw_record: Dict[str, Any], mapping: Dict[str, Any], canoni
 def get_required_business_fields(canonical_table: str) -> List[str]:
     """Get list of required business fields that must be present to prevent metadata-only records."""
     required_fields = {
-        'companies': ['id', 'name'],  # FIXED: Match actual mapping output field name
+        'companies': ['id', 'company_name'],  # FIXED: Match actual canonical mapping output field name
         'contacts': ['id', 'first_name', 'last_name'],  # Must have ID and name fields
         'tickets': ['id', 'summary'],  # Must have ID and summary
         'time_entries': ['id', 'actual_hours']  # FIXED: Match corrected field name
@@ -568,19 +642,26 @@ def apply_scd_type1_logic(config: Config, tenant_id: str, canonical_table: str, 
                 logger.error(f"No valid ID field found for table {canonical_table}")
                 return new_records
         
-        # Ensure updated_date is datetime
-        if 'updated_date' in df.columns:
-            df['updated_date'] = pd.to_datetime(df['updated_date'])
+        # Ensure last_updated is datetime (using correct canonical field name)
+        if 'last_updated' in df.columns:
+            df['last_updated'] = pd.to_datetime(df['last_updated'])
         else:
-            # Use current timestamp if no updated_date
-            df['updated_date'] = pd.Timestamp.now(tz='UTC')
-            logger.warning(f"No updated_date field found, using current timestamp")
+            # Check for created_date as fallback (proper data source fallback)
+            if 'created_date' in df.columns:
+                logger.warning(f"last_updated missing, using created_date as fallback for {canonical_table}")
+                df['last_updated'] = pd.to_datetime(df['created_date'])
+            else:
+                # This indicates a serious mapping configuration issue
+                logger.error(f"CRITICAL MAPPING ERROR: Neither last_updated nor created_date found in {canonical_table}")
+                logger.error(f"Available columns: {list(df.columns)}")
+                logger.error(f"This indicates the canonical mapping is not correctly configured")
+                raise ValueError(f"Missing timestamp fields in {canonical_table}: mapping must include last_updated or created_date")
         
         # For SCD Type 1, keep only the latest record per ID
         logger.info(f"Deduplicating records by {id_field} for SCD Type 1")
         
-        # Sort by ID and updated_date, then keep the last (most recent) record per ID
-        df_sorted = df.sort_values([id_field, 'updated_date'])
+        # Sort by ID and last_updated, then keep the last (most recent) record per ID
+        df_sorted = df.sort_values([id_field, 'last_updated'])
         df_deduplicated = df_sorted.groupby(id_field).tail(1).reset_index(drop=True)
         
         logger.info(f"Deduplicated from {len(df)} to {len(df_deduplicated)} records for SCD Type 1")
@@ -590,14 +671,15 @@ def apply_scd_type1_logic(config: Config, tenant_id: str, canonical_table: str, 
         for _, row in df_deduplicated.iterrows():
             record = row.to_dict()
             
-            # CRITICAL FIX: For SCD Type 1, DO NOT add SCD Type 2 fields
-            # SCD Type 1 means simple upsert with no historical tracking
+            # Use shared schema manager for consistent metadata fields
+            metadata_fields = CanonicalSchemaManager.get_standard_metadata_fields('type_1')
+            
             # Remove any SCD Type 2 fields that might have been added
             scd_type2_fields = ['effective_start_date', 'effective_end_date', 'is_current']
             for field in scd_type2_fields:
                 record.pop(field, None)
             
-            # Add only the basic metadata fields for SCD Type 1
+            # Add standard metadata fields for SCD Type 1
             record['record_hash'] = calculate_record_hash(record)
             record['ingestion_timestamp'] = datetime.now(timezone.utc).isoformat()
             
@@ -647,13 +729,20 @@ def apply_scd_type2_logic(config: Config, tenant_id: str, canonical_table: str, 
                 logger.error(f"No valid ID field found for table {canonical_table}")
                 return new_records
         
-        # Ensure updated_date is datetime
-        if 'updated_date' in df.columns:
-            df['updated_date'] = pd.to_datetime(df['updated_date'])
+        # Ensure last_updated is datetime (using correct canonical field name)
+        if 'last_updated' in df.columns:
+            df['last_updated'] = pd.to_datetime(df['last_updated'])
         else:
-            # Use current timestamp if no updated_date
-            df['updated_date'] = pd.Timestamp.now(tz='UTC')
-            logger.warning(f"No updated_date field found, using current timestamp")
+            # Check for created_date as fallback (proper data source fallback)
+            if 'created_date' in df.columns:
+                logger.warning(f"last_updated missing, using created_date as fallback for {canonical_table}")
+                df['last_updated'] = pd.to_datetime(df['created_date'])
+            else:
+                # This indicates a serious mapping configuration issue
+                logger.error(f"CRITICAL MAPPING ERROR: Neither last_updated nor created_date found in {canonical_table}")
+                logger.error(f"Available columns: {list(df.columns)}")
+                logger.error(f"This indicates the canonical mapping is not correctly configured")
+                raise ValueError(f"Missing timestamp fields in {canonical_table}: mapping must include last_updated or created_date")
         
         # Step 1: Remove exact duplicates first (same ID and same data hash)
         logger.info(f"Removing exact duplicates based on ID and record content")
@@ -669,12 +758,12 @@ def apply_scd_type2_logic(config: Config, tenant_id: str, canonical_table: str, 
         if exact_dupes_removed > 0:
             logger.info(f"Removed {exact_dupes_removed} exact duplicate records")
         
-        # Step 2: For each ID, keep only the record with the latest updated_date
+        # Step 2: For each ID, keep only the record with the latest last_updated
         # This ensures we don't have multiple "current" records for the same ID
-        logger.info(f"Deduplicating records by {id_field} and updated_date")
+        logger.info(f"Deduplicating records by {id_field} and last_updated")
         
-        # Sort by ID and updated_date, then keep the last (most recent) record per ID
-        df_sorted = df_no_exact_dupes.sort_values([id_field, 'updated_date'])
+        # Sort by ID and last_updated, then keep the last (most recent) record per ID
+        df_sorted = df_no_exact_dupes.sort_values([id_field, 'last_updated'])
         df_deduplicated = df_sorted.groupby(id_field).tail(1).reset_index(drop=True)
         
         logger.info(f"Deduplicated from {len(df)} to {len(df_deduplicated)} records")
@@ -687,8 +776,11 @@ def apply_scd_type2_logic(config: Config, tenant_id: str, canonical_table: str, 
             # Remove temporary hash field
             record.pop('temp_record_hash', None)
             
-            # Use updated_date as effective_start_date (this is the key fix)
-            record['effective_start_date'] = record['updated_date']
+            # Use shared schema manager for consistent metadata fields
+            metadata_fields = CanonicalSchemaManager.get_standard_metadata_fields('type_2')
+            
+            # Add SCD Type 2 metadata fields
+            record['effective_start_date'] = record['last_updated']
             record['effective_end_date'] = None
             record['is_current'] = True  # Only the latest version per ID is current
             record['record_hash'] = calculate_record_hash(record)
@@ -829,4 +921,3 @@ def trigger_clickhouse_loader(tenant_id: str, canonical_table: str, logger: Pipe
             
     except Exception as e:
         logger.error(f"Failed to trigger ClickHouse loader: {str(e)}")
-        raise

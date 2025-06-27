@@ -55,69 +55,8 @@ class CanonicalMapper:
         # Cache for loaded mappings
         self._mapping_cache = {}
 
-    def get_default_mapping(self, table_type: str) -> Dict[str, Any]:
-        """
-        Get default mapping configuration for a table type.
-        
-        EMERGENCY FIX: Updated to match actual mapping files to prevent data corruption.
-        
-        Args:
-            table_type: Type of table (companies, contacts, tickets, time_entries)
-            
-        Returns:
-            Default mapping configuration matching the actual mapping files
-        """
-        default_mappings = {
-            'companies': {
-                'id_field': 'id',
-                'fields': {
-                    'id': 'id',  # FIXED: Match actual mapping file
-                    'company_id': 'id',  # Keep for backward compatibility
-                    'company_name': 'name',  # FIXED: Match actual mapping file
-                    'company_identifier': 'identifier',
-                    'status': 'status__name',
-                    'last_updated': '_info__lastUpdated'
-                }
-            },
-            'contacts': {
-                'id_field': 'id',
-                'fields': {
-                    'id': 'id',  # FIXED: Match actual mapping file
-                    'contact_id': 'id',
-                    'company_id': 'company__id',
-                    'first_name': 'firstName',
-                    'last_name': 'lastName',
-                    'company_name': 'company__name',
-                    'last_updated': '_info__lastUpdated'
-                }
-            },
-            'tickets': {
-                'id_field': 'id',
-                'fields': {
-                    'id': 'id',  # FIXED: Match actual mapping file
-                    'ticket_id': 'id',
-                    'company_id': 'company__id',
-                    'contact_id': 'contact__id',
-                    'summary': 'summary',
-                    'status': 'status__name',
-                    'last_updated': '_info__lastUpdated'
-                }
-            },
-            'time_entries': {
-                'id_field': 'id',
-                'fields': {
-                    'id': 'id',  # FIXED: Match actual mapping file
-                    'entry_id': 'id',
-                    'company_id': 'company__id',
-                    'ticket_id': 'ticket__id',
-                    'actual_hours': 'actualHours',  # FIXED: Match actual mapping file
-                    'notes': 'notes',
-                    'last_updated': '_info__lastUpdated'
-                }
-            }
-        }
-        
-        return default_mappings.get(table_type, {})
+# REMOVED: get_default_mapping function - redundant since we have actual mapping files
+# This eliminates hardcoded fallback data that could drift from real JSON files
 
     def load_mapping(self, table_type: str, bucket: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -168,10 +107,10 @@ class CanonicalMapper:
             except Exception as e:
                 logger.warning(f"Failed to load mapping from S3: {e}")
         
-        # Use default mapping as final fallback
+        # If no mapping found, raise an error - we should always have mapping files
         if mapping is None:
-            mapping = self.get_default_mapping(table_type)
-            logger.info(f"Using default mapping for {table_type}")
+            raise FileNotFoundError(f"No mapping file found for table type '{table_type}'. "
+                                  f"Expected file: mappings/canonical/{table_type}.json")
         
         # Cache the result
         self._mapping_cache[cache_key] = mapping
@@ -278,17 +217,37 @@ class CanonicalMapper:
             Transformed canonical record or None if transformation fails
         """
         try:
-            if not mapping or 'fields' not in mapping:
-                logger.warning(f"Invalid mapping for {canonical_table}, using default mapping")
-                mapping = self.get_default_mapping(canonical_table)
-                if not mapping or 'fields' not in mapping:
-                    logger.error(f"No valid mapping available for {canonical_table}")
-                    return None
+            if not mapping:
+                logger.error(f"Invalid or missing mapping for {canonical_table}")
+                return None
             
             canonical_record = {}
             
-            # Apply field mappings
-            for canonical_field, source_field in mapping['fields'].items():
+            # Determine the service based on source system (default to connectwise)
+            source_mapping = self.get_source_mapping(canonical_table)
+            service = source_mapping['service'] if source_mapping else 'connectwise'
+            
+            # Get service-specific mapping
+            service_mapping = mapping.get(service)
+            if not service_mapping:
+                logger.error(f"No mapping found for service '{service}' in {canonical_table}")
+                return None
+            
+            # Get the table-specific mapping within the service
+            source_table = source_mapping['table'] if source_mapping else canonical_table
+            table_mapping_key = f"{service}/{source_table}" if service == 'connectwise' else source_table
+            table_mapping = service_mapping.get(table_mapping_key) or service_mapping.get(source_table)
+            
+            if not table_mapping:
+                # Fallback - try to find any mapping in the service
+                if len(service_mapping) == 1:
+                    table_mapping = list(service_mapping.values())[0]
+                else:
+                    logger.error(f"No table mapping found for '{table_mapping_key}' in service '{service}'")
+                    return None
+            
+            # Apply field mappings - transform ALL fields from the mapping
+            for canonical_field, source_field in table_mapping.items():
                 value = self._get_nested_value(raw_record, source_field)
                 if value is not None:
                     # Convert ID fields to strings for consistency
@@ -296,31 +255,31 @@ class CanonicalMapper:
                         canonical_record[canonical_field] = str(value)
                     else:
                         canonical_record[canonical_field] = value
+                else:
+                    # Set None for missing fields to maintain schema consistency
+                    canonical_record[canonical_field] = None
             
             # CRITICAL FIX: Add tenant_id to prevent NULL values
             if tenant_id:
                 canonical_record['tenant_id'] = tenant_id
             
             # Add metadata fields
-            source_mapping = self.get_source_mapping(canonical_table)
             if source_mapping:
                 canonical_record['source_system'] = source_mapping['service']
                 canonical_record['source_table'] = source_mapping['table']
             
             canonical_record['canonical_table'] = canonical_table
             
-            # Add SCD Type 2 fields
+            # CRITICAL FIX: Do NOT add SCD Type 2 fields here
+            # SCD fields should be added by the SCD processing logic based on table configuration
+            # This was causing schema mismatches for Type 1 tables
             current_timestamp = get_timestamp()
-            
-            # Use updated_date if available, otherwise use current timestamp
-            effective_date = canonical_record.get('updated_date', current_timestamp)
-            canonical_record['effective_start_date'] = effective_date
-            canonical_record['effective_end_date'] = None
-            canonical_record['is_current'] = True
             canonical_record['ingestion_timestamp'] = current_timestamp
             
             # Calculate record hash for change detection
             canonical_record['record_hash'] = self._calculate_record_hash(canonical_record)
+            
+            logger.debug(f"Transformed record with {len(canonical_record)} fields for {canonical_table}")
             
             return canonical_record
             

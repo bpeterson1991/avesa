@@ -1,5 +1,54 @@
 {
   "scd_type": "type_1",
+  "field_types": {
+    "id": "String",
+    "company_name": "Nullable(String)",
+    "company_identifier": "Nullable(String)",
+    "company_type": "Nullable(String)",
+    "status": "Nullable(String)",
+    "address_line1": "Nullable(String)",
+    "address_line2": "Nullable(String)",
+    "city": "Nullable(String)",
+    "state": "Nullable(String)",
+    "zip": "Nullable(String)",
+    "country": "Nullable(String)",
+    "phone_number": "Nullable(String)",
+    "fax_number": "Nullable(String)",
+    "website": "Nullable(String)",
+    "territory_id": "Nullable(String)",
+    "territory_name": "Nullable(String)",
+    "market_id": "Nullable(String)",
+    "market_name": "Nullable(String)",
+    "account_number": "Nullable(String)",
+    "default_contact_id": "Nullable(String)",
+    "default_contact_name": "Nullable(String)",
+    "date_acquired": "Nullable(Date)",
+    "annual_revenue": "Nullable(Float64)",
+    "number_of_employees": "Nullable(UInt32)",
+    "ownership_type": "Nullable(String)",
+    "time_zone": "Nullable(String)",
+    "lead_source": "Nullable(String)",
+    "lead_flag": "Nullable(Bool)",
+    "unsubscribe_flag": "Nullable(Bool)",
+    "calendar_id": "Nullable(String)",
+    "vendor_identifier": "Nullable(String)",
+    "tax_identifier": "Nullable(String)",
+    "tax_code": "Nullable(String)",
+    "billing_contact_id": "Nullable(String)",
+    "billing_contact_name": "Nullable(String)",
+    "invoice_template_id": "Nullable(String)",
+    "price_schedule_id": "Nullable(String)",
+    "company_entity_type": "Nullable(String)",
+    "bill_to_company_id": "Nullable(String)",
+    "bill_to_company_name": "Nullable(String)",
+    "billing_terms": "Nullable(String)",
+    "invoice_delivery_method": "Nullable(String)",
+    "currency_id": "Nullable(String)",
+    "currency_symbol": "Nullable(String)",
+    "updated_date": "DateTime",
+    "last_updated": "DateTime",
+    "last_updated_by": "Nullable(String)"
+  },
   "connectwise": {
     "company/companies": {
       "id": "id",
@@ -46,6 +95,7 @@
       "invoice_delivery_method": "invoiceDeliveryMethod__name",
       "currency_id": "currency__id",
       "currency_symbol": "currency__symbol",
+      "updated_date": "_info__lastUpdated",
       "last_updated": "_info__lastUpdated",
       "last_updated_by": "_info__updatedBy"
     }
@@ -65,6 +115,7 @@
       "fax_number": "fax_phone",
       "website": "website",
       "number_of_employees": "employees",
+      "updated_date": "sys_updated_on",
       "last_updated": "sys_updated_on",
       "last_updated_by": "sys_updated_by"
     }
@@ -84,6 +135,7 @@
       "website": "Website",
       "annual_revenue": "AnnualRevenue",
       "number_of_employees": "NumberOfEmployees",
+      "updated_date": "LastModifiedDate",
       "last_updated": "LastModifiedDate",
       "last_updated_by": "LastModifiedById"
     }

@@ -1,5 +1,33 @@
 {
   "scd_type": "type_1",
+  "field_types": {
+    "id": "String",
+    "company_id": "Nullable(String)",
+    "company_name": "Nullable(String)",
+    "charge_to_id": "Nullable(String)",
+    "charge_to_type": "Nullable(String)",
+    "member_id": "Nullable(String)",
+    "member_name": "Nullable(String)",
+    "location_id": "Nullable(String)",
+    "business_unit_id": "Nullable(String)",
+    "work_type_id": "Nullable(String)",
+    "work_type_name": "Nullable(String)",
+    "work_role_id": "Nullable(String)",
+    "work_role_name": "Nullable(String)",
+    "agreement_id": "Nullable(String)",
+    "agreement_name": "Nullable(String)",
+    "time_start": "Nullable(DateTime)",
+    "time_end": "Nullable(DateTime)",
+    "hours_deduct": "Nullable(Float64)",
+    "actual_hours": "Nullable(Float64)",
+    "billable_option": "Nullable(String)",
+    "notes": "Nullable(String)",
+    "internal_notes": "Nullable(String)",
+    "date_entered": "Nullable(DateTime)",
+    "entered_by": "Nullable(String)",
+    "last_updated": "DateTime",
+    "last_updated_by": "Nullable(String)"
+  },
   "connectwise": {
     "time/entries": {
       "id": "id",

@@ -1,0 +1,94 @@
+{
+  "service_name": "connectwise",
+  "api_version": "v4_6_release/apis/3.0",
+  "endpoints": {
+    "service/tickets": {
+      "enabled": true,
+      "table_name": "tickets",
+      "sync_frequency": "15min",
+      "page_size": 1000,
+      "order_by": "id asc",
+      "incremental_field": "_info/lastUpdated",
+      "description": "Service tickets and requests"
+    },
+    "time/entries": {
+      "enabled": true,
+      "table_name": "time_entries",
+      "sync_frequency": "15min",
+      "page_size": 1000,
+      "order_by": "id asc",
+      "incremental_field": "_info/lastUpdated",
+      "description": "Time tracking entries"
+    },
+    "company/companies": {
+      "enabled": true,
+      "table_name": "companies",
+      "sync_frequency": "30min",
+      "page_size": 1000,
+      "order_by": "id asc",
+      "incremental_field": "_info/lastUpdated",
+      "description": "Customer companies and accounts"
+    },
+    "company/contacts": {
+      "enabled": true,
+      "table_name": "contacts",
+      "sync_frequency": "30min",
+      "page_size": 1000,
+      "order_by": "id asc",
+      "incremental_field": "_info/lastUpdated",
+      "description": "Company contacts and users"
+    },
+    "procurement/products": {
+      "enabled": false,
+      "table_name": "products",
+      "sync_frequency": "60min",
+      "page_size": 1000,
+      "order_by": "id asc",
+      "incremental_field": "_info/lastUpdated",
+      "description": "Product catalog items"
+    },
+    "finance/agreements": {
+      "enabled": false,
+      "table_name": "agreements",
+      "sync_frequency": "60min",
+      "page_size": 1000,
+      "order_by": "id asc",
+      "incremental_field": "_info/lastUpdated",
+      "description": "Service agreements and contracts"
+    },
+    "project/projects": {
+      "enabled": false,
+      "table_name": "projects",
+      "sync_frequency": "30min",
+      "page_size": 1000,
+      "order_by": "id asc",
+      "incremental_field": "_info/lastUpdated",
+      "description": "Project management data"
+    },
+    "system/members": {
+      "enabled": false,
+      "table_name": "members",
+      "sync_frequency": "60min",
+      "page_size": 1000,
+      "order_by": "id asc",
+      "incremental_field": "_info/lastUpdated",
+      "description": "System users and technicians"
+    }
+  },
+  "authentication": {
+    "type": "basic_auth",
+    "username_field": "company_id+public_key",
+    "password_field": "private_key",
+    "client_id_required": true
+  },
+  "rate_limiting": {
+    "requests_per_minute": 300,
+    "burst_limit": 50,
+    "retry_strategy": "exponential_backoff"
+  },
+  "error_handling": {
+    "retry_attempts": 3,
+    "retry_delay_seconds": 5,
+    "timeout_seconds": 30
+  }
+}

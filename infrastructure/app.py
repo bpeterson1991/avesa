@@ -9,7 +9,6 @@ import os
 import json
 import boto3
 from aws_cdk import App, Environment
-from stacks.backfill_stack import BackfillStack
 from stacks.performance_optimization_stack import PerformanceOptimizationStack
 from stacks.clickhouse_stack import ClickHouseStack
 from monitoring.data_quality_pipeline_monitoring import DataQualityPipelineMonitoringStack
@@ -114,18 +113,6 @@ performance_stack = PerformanceOptimizationStack(
     last_updated_table_name=f"LastUpdated{env_config['table_suffix']}"
 )
 
-# Deploy backfill stack for testing
-backfill_stack = BackfillStack(
-    app,
-    f"AVESABackfill{env_config['table_suffix']}",
-    env=env,
-    environment=environment,
-    data_bucket_name=env_config["bucket_name"],
-    tenant_services_table_name=f"TenantServices{env_config['table_suffix']}",
-    lambda_memory=env_config["lambda_memory"],
-    lambda_timeout=env_config["lambda_timeout"]
-)
-
 # Deploy ClickHouse stack for multi-tenant analytics
 clickhouse_stack = ClickHouseStack(
     app,
@@ -153,11 +140,6 @@ monitoring_stack = DataQualityPipelineMonitoringStack(
 #    - Step Functions orchestration for optimized processing
 #    - Lambda functions for data ingestion and transformation
 #    - IAM roles and policies for secure access
-#
-# 2. BackfillStack - Historical data processing and tenant onboarding:
-#    - Backfill orchestration for new tenant onboarding
-#    - Historical data migration capabilities
-#    - Batch processing for large datasets
 #
 # 3. ClickHouseStack - Multi-tenant analytics database and API layer:
 #    - ClickHouse Cloud integration for real-time analytics

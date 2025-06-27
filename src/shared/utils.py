@@ -283,6 +283,7 @@ def discover_canonical_tables() -> List[str]:
     This function tries multiple sources in order of preference:
     1. Bundled mapping files (Lambda package)
     2. Local development mappings (relative path)
+    3. S3 bucket (if BUCKET_NAME environment variable is set)
     
     Returns:
         List of canonical table names
@@ -313,6 +314,42 @@ def discover_canonical_tables() -> List[str]:
                 for file_path in glob.glob(os.path.join(local_canonical_dir, '*.json')):
                     table_name = os.path.basename(file_path).replace('.json', '')
                     canonical_tables.append(table_name)
+        
+        # Try S3 as fallback (if in Lambda environment with S3 access)
+        if not canonical_tables:
+            bucket_name = os.environ.get('BUCKET_NAME')
+            print(f"DEBUG: S3 fallback triggered. BUCKET_NAME={bucket_name}")
+            if bucket_name:
+                try:
+                    import boto3
+                    s3 = boto3.client('s3')
+                    print(f"DEBUG: S3 client created, listing objects with prefix 'mappings/canonical/'")
+                    
+                    # List objects in the canonical mappings directory
+                    response = s3.list_objects_v2(
+                        Bucket=bucket_name,
+                        Prefix='mappings/canonical/'
+                    )
+                    
+                    print(f"DEBUG: S3 list_objects_v2 response: {response}")
+                    
+                    for obj in response.get('Contents', []):
+                        key = obj['Key']
+                        print(f"DEBUG: Found S3 key: {key}")
+                        if key.endswith('.json'):
+                            # Extract table name from S3 key
+                            table_name = os.path.basename(key).replace('.json', '')
+                            canonical_tables.append(table_name)
+                            print(f"DEBUG: Added canonical table: {table_name}")
+                    
+                    print(f"Found {len(canonical_tables)} canonical tables in S3: {canonical_tables}")
+                    
+                except Exception as s3_error:
+                    print(f"Failed to discover canonical tables from S3: {s3_error}")
+                    import traceback
+                    print(f"S3 error traceback: {traceback.format_exc()}")
+            else:
+                print("DEBUG: No BUCKET_NAME environment variable found")
         
         return sorted(canonical_tables)
         

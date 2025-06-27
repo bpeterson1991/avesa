@@ -66,7 +66,7 @@ class ServiceCredentials:
 class TimeoutHandler:
     """Handles Lambda timeout detection and graceful continuation."""
     
-    def __init__(self, context, buffer_seconds: int = 60):
+    def __init__(self, context, buffer_seconds: int = 15):
         self.context = context
         self.buffer_seconds = buffer_seconds
         self.start_time = time.time()
@@ -94,6 +94,8 @@ class ChunkProcessor:
         self.cloudwatch = get_cloudwatch_client()
         self.s3_client = get_s3_client()
         
+        # Note: Lambda client for canonical transformation removed - now handled by result aggregator
+        
         # Table names
         self.chunk_progress_table = f"ChunkProgress-{self.config.environment}"
         self.last_updated_table = self.config.last_updated_table
@@ -110,6 +112,8 @@ class ChunkProcessor:
             Chunk processing results
         """
         try:
+            self.logger.info(f"Chunk processor started - AWS Request ID: {context.aws_request_id}")
+            
             chunk_config = event['chunk_config']
             table_config = event['table_config']
             tenant_config = event['tenant_config']
@@ -120,10 +124,12 @@ class ChunkProcessor:
             tenant_id = tenant_config['tenant_id']
             
             self.logger = PipelineLogger("chunk-processor", tenant_id=tenant_id, table_name=table_name)
-            self.logger.info("Starting chunk processing", job_id=job_id, chunk_id=chunk_id)
+            self.logger.info(f"Starting chunk processing",
+                           job_id=job_id,
+                           chunk_id=chunk_id)
             
             # Initialize timeout handler
-            timeout_handler = TimeoutHandler(context, buffer_seconds=60)
+            timeout_handler = TimeoutHandler(context, buffer_seconds=15)
             
             # Initialize chunk progress tracking
             self._initialize_chunk_progress(chunk_config, job_id)
@@ -152,27 +158,100 @@ class ChunkProcessor:
                 'status': 'completed' if processing_result['completed'] else 'timeout_continuation',
                 'records_processed': processing_result['records_processed'],
                 'processing_time': processing_result['processing_time'],
-                'continuation_state': processing_result.get('continuation_state')
+                'continuation_state': processing_result.get('continuation_state'),
+                's3_files_written': processing_result.get('s3_files_written', []),
+                's3_files_count': processing_result.get('s3_files_count', 0),
+                'table_metadata': {
+                    'tenant_id': tenant_id,
+                    'service_name': table_config['service_name'],
+                    'table_name': table_config['table_name']
+                }
             }
             
-            self.logger.info(
-                "Chunk processing completed",
-                job_id=job_id,
-                chunk_id=chunk_id,
-                records_processed=processing_result['records_processed'],
-                completed=processing_result['completed']
-            )
+            # COMPLETION CALLBACK: Trigger result aggregator when chunk processing completes successfully
+            if (processing_result['completed'] and
+                processing_result.get('s3_files_written') and
+                len(processing_result.get('s3_files_written', [])) > 0):
+                
+                self.logger.info(f"🚀 COMPLETION CALLBACK: Triggering result aggregator for completed chunk {chunk_id}")
+                
+                try:
+                    import boto3
+                    lambda_client = boto3.client('lambda')
+                    
+                    # Get environment for result aggregator function name
+                    environment = self.config.environment
+                    result_aggregator_function = f"avesa-result-aggregator-{environment}"
+                    
+                    # Create aggregator payload with completed chunk information
+                    aggregator_payload = {
+                        "job_id": job_id,
+                        "chunk_results": [
+                            {
+                                "chunk_id": chunk_id,
+                                "tenant_id": tenant_id,
+                                "table_name": table_name,
+                                "status": "completed",
+                                "records_processed": processing_result['records_processed'],
+                                "s3_files_written": processing_result.get('s3_files_written', []),
+                                "s3_files_count": processing_result.get('s3_files_count', 0),
+                                "table_metadata": result['table_metadata'],
+                                "processing_time_seconds": processing_result['processing_time']
+                            }
+                        ]
+                    }
+                    
+                    # Invoke result aggregator asynchronously
+                    aggregator_response = lambda_client.invoke(
+                        FunctionName=result_aggregator_function,
+                        InvocationType='Event',  # Async to avoid blocking
+                        Payload=json.dumps(aggregator_payload)
+                    )
+                    
+                    self.logger.info(f"✅ COMPLETION CALLBACK SUCCESS: Result aggregator triggered for chunk {chunk_id}",
+                                   aggregator_status=aggregator_response.get('StatusCode'),
+                                   job_id=job_id,
+                                   tenant_id=tenant_id)
+                                   
+                except Exception as callback_error:
+                    self.logger.error(f"❌ COMPLETION CALLBACK FAILED: Could not trigger result aggregator for chunk {chunk_id}: {str(callback_error)}")
+                    # Don't fail the chunk processing due to callback failure
+            
+            # CRITICAL DEBUG: Log response before returning
+            import sys
+            result_size = sys.getsizeof(str(result))
+            self.logger.info("🔍 CHUNK DEBUG: About to return response",
+                           job_id=job_id,
+                           chunk_id=chunk_id,
+                           records_processed=processing_result['records_processed'],
+                           completed=processing_result['completed'],
+                           result_size_bytes=result_size,
+                           response_keys=list(result.keys()))
+            
+            self.logger.info("🔍 CHUNK DEBUG: Full response payload", response=result)
             
             return result
             
         except Exception as e:
-            self.logger.error(f"Chunk processing failed: {str(e)}", error=str(e))
+            self.logger.error(f"🚨 CHUNK DEBUG: Chunk processing failed with exception",
+                            error=str(e),
+                            error_type=type(e).__name__,
+                            chunk_id=locals().get('chunk_id', 'unknown'),
+                            job_id=locals().get('job_id', 'unknown'))
             
             # Update chunk progress to failed
             if 'chunk_id' in locals() and 'job_id' in locals():
                 self._update_chunk_progress(chunk_id, job_id, 'failed', {'error': str(e)})
             
-            raise
+            # Return error response instead of raising to see if this helps
+            return {
+                'chunk_id': locals().get('chunk_id', 'unknown'),
+                'status': 'failed',
+                'records_processed': 0,
+                'processing_time': 0,
+                'error': str(e),
+                'errorMessage': str(e)  # Lambda standard error field
+            }
     
     def _initialize_chunk_progress(self, chunk_config: Dict[str, Any], job_id: str):
         """Initialize chunk progress tracking."""
@@ -202,16 +281,16 @@ class ChunkProcessor:
             self.logger.warning(f"Failed to initialize chunk progress: {str(e)}")
     
     def _process_chunk(
-        self, 
-        chunk_config: Dict[str, Any], 
+        self,
+        chunk_config: Dict[str, Any],
         table_config: Dict[str, Any],
         tenant_config: Dict[str, Any],
         timeout_handler: TimeoutHandler
     ) -> Dict[str, Any]:
-        """Process a single chunk of data."""
+        """Process a single chunk of data with memory-efficient streaming to S3."""
         start_time = time.time()
         records_processed = 0
-        all_records = []
+        s3_files_written = []
         
         try:
             # Get credentials
@@ -220,65 +299,190 @@ class ChunkProcessor:
                 raise ValueError("No credentials provided for API access")
             
             service_credentials = ServiceCredentials.from_dict(credentials)
+            service_name = table_config.get('service_name', 'unknown')
             
-            # Calculate pagination parameters
-            start_offset = chunk_config['start_offset']
-            end_offset = chunk_config['end_offset']
-            chunk_size = end_offset - start_offset
+            # Get configured page size from endpoint configuration
+            configured_page_size = table_config.get('page_size', 1000)
             
-            # Use optimized page size for API calls
-            page_size = min(2000, max(1000, chunk_size // 5))
+            # Memory optimization: Write to S3 every N batches to avoid memory accumulation
+            write_batch_size = 20  # Write to S3 every 5 API batches (20000 records max in memory)
+            batch_buffer = []
+            batch_count = 0
+            file_batch_number = 0  # Cumulative file counter (never resets)
             
-            # Process data in batches within the chunk
-            current_offset = start_offset
+            # CRITICAL DEBUG: Log all record limit sources and disable enforcement for backfill
+            explicit_record_limit = chunk_config.get('record_limit')
+            estimated_records = chunk_config.get('estimated_records')
             
-            while current_offset < end_offset and timeout_handler.should_continue():
-                # Calculate batch size for this iteration
-                remaining_records = end_offset - current_offset
-                batch_size = min(page_size, remaining_records)
+            # For backfill operations, we want to fetch ALL available data, not limit by estimates
+            # Only use explicit record_limit if it's specifically set by orchestrator
+            if explicit_record_limit:
+                record_limit = explicit_record_limit
+                self.logger.info(f"🎯 USING EXPLICIT RECORD LIMIT: {record_limit}")
+            else:
+                # For backfill, ignore estimated_records and fetch all data
+                record_limit = None
+                self.logger.info(f"🎯 BACKFILL MODE: No record limit enforced (ignoring estimated_records: {estimated_records})")
+            
+            # For backfill operations, we want to fetch ALL available data up to the limit
+            current_page = 1
+            current_offset = 0
+            
+            # Continue fetching until we get no more records or timeout
+            while timeout_handler.should_continue():
+                # RECORD LIMIT ENFORCEMENT: Stop if we've reached the limit
+                if record_limit and records_processed >= record_limit:
+                    self.logger.info("🛑 RECORD LIMIT REACHED: Stopping data fetching",
+                                   records_processed=records_processed,
+                                   record_limit=record_limit)
+                    break
                 
-                # Fetch batch of data
+                # Adjust batch size to not exceed record limit
+                effective_batch_size = configured_page_size
+                if record_limit:
+                    remaining_records = record_limit - records_processed
+                    if remaining_records <= 0:
+                        break
+                    effective_batch_size = min(configured_page_size, remaining_records)
+                
+                # Fetch batch of data using adjusted batch size
                 batch_records = self._fetch_data_batch(
                     table_config,
                     service_credentials,
                     current_offset,
-                    batch_size
+                    effective_batch_size
                 )
                 
+                # If no records returned, we've reached the end
                 if not batch_records:
+                    self.logger.info(
+                        f"🛑 STOPPING: No more records returned from API",
+                        current_page=current_page,
+                        total_processed=records_processed,
+                        api_url=f"{table_config.get('service_name', 'unknown')} {table_config.get('endpoint', 'unknown')}",
+                        offset=current_offset,
+                        requested_batch_size=effective_batch_size
+                    )
                     break
                 
-                all_records.extend(batch_records)
+                # Add records to current batch buffer
+                batch_buffer.extend(batch_records)
                 records_processed += len(batch_records)
-                current_offset += len(batch_records)
+                batch_count += 1
                 
-                # Log progress
-                self.logger.debug(
-                    f"Processed batch: {len(batch_records)} records",
-                    current_offset=current_offset,
-                    total_processed=records_processed
+                # Update offset for next iteration
+                if service_name.lower() == 'connectwise':
+                    # ConnectWise uses page-based pagination
+                    current_page += 1
+                    current_offset = (current_page - 1) * configured_page_size
+                else:
+                    # Other services may use offset-based pagination
+                    current_offset += len(batch_records)
+                
+                # Log progress with record limit status
+                progress_info = {
+                    "batch_size": len(batch_records),
+                    "current_page": current_page,
+                    "current_offset": current_offset,
+                    "total_processed": records_processed,
+                    "buffer_size": len(batch_buffer),
+                    "service": service_name
+                }
+                
+                if record_limit:
+                    progress_info["record_limit"] = record_limit
+                    progress_info["remaining"] = record_limit - records_processed
+                    
+                self.logger.info(f"Processed batch: {len(batch_records)} records", **progress_info)
+                
+                # Write to S3 when buffer reaches write_batch_size (5000 records)
+                should_write = batch_count >= write_batch_size
+                
+                if should_write and batch_buffer:
+                    file_batch_number += 1  # Increment file counter
+                    s3_key = self._write_batch_to_s3(
+                        batch_buffer,
+                        chunk_config,
+                        table_config,
+                        tenant_config,
+                        file_batch_number
+                    )
+                    if s3_key:
+                        s3_files_written.append(s3_key)
+                    
+                    self.logger.info(
+                        f"Wrote batch buffer to S3: {len(batch_buffer)} records",
+                        buffer_size=len(batch_buffer),
+                        total_processed=records_processed,
+                        s3_files_count=len(s3_files_written)
+                    )
+                    
+                    # Clear buffer to free memory
+                    batch_buffer.clear()
+                    batch_count = 0
+                
+                # Only stop if we get zero records - partial pages may still have more data
+                if len(batch_records) == 0:
+                    self.logger.info(
+                        f"No more records returned from API, reached end of data",
+                        current_page=current_page,
+                        total_processed=records_processed
+                    )
+                    break
+                
+                # Log when we get partial pages but continue processing
+                if len(batch_records) < configured_page_size:
+                    self.logger.info(
+                        f"Received partial page but continuing (API may have more data)",
+                        received=len(batch_records),
+                        page_size=configured_page_size,
+                        current_page=current_page,
+                        total_processed=records_processed
+                    )
+            
+            # Write any remaining records in buffer
+            if batch_buffer:
+                file_batch_number += 1  # Fix: Increment for final batch
+                s3_key = self._write_batch_to_s3(
+                    batch_buffer,
+                    chunk_config,
+                    table_config,
+                    tenant_config,
+                    file_batch_number
+                )
+                if s3_key:
+                    s3_files_written.append(s3_key)
+                
+                self.logger.info(
+                    f"Wrote final batch buffer to S3: {len(batch_buffer)} records",
+                    buffer_size=len(batch_buffer),
+                    total_processed=records_processed,
+                    s3_files_count=len(s3_files_written)
                 )
             
-            # Write data to S3 if we have records
-            if all_records:
-                self._write_to_s3(all_records, chunk_config, table_config, tenant_config)
-            
             processing_time = time.time() - start_time
-            completed = current_offset >= end_offset
+            
+            # For backfill operations, we consider it completed when we've fetched all available data
+            completed = True
             
             result = {
                 'completed': completed,
                 'records_processed': records_processed,
                 'processing_time': processing_time,
-                'current_offset': current_offset
+                'final_page': current_page,
+                'final_offset': current_offset,
+                's3_files_written': s3_files_written,
+                's3_files_count': len(s3_files_written)
             }
             
-            # Add continuation state if not completed
-            if not completed:
-                result['continuation_state'] = {
-                    'current_offset': current_offset,
-                    'remaining_records': end_offset - current_offset
-                }
+            self.logger.info(
+                f"Memory-efficient chunk processing completed",
+                records_processed=records_processed,
+                processing_time=processing_time,
+                final_page=current_page,
+                s3_files_count=len(s3_files_written),
+                service=service_name
+            )
             
             return result
             
@@ -298,13 +502,16 @@ class ChunkProcessor:
         table_config: Dict[str, Any],
         credentials: ServiceCredentials,
         offset: int,
-        batch_size: int
+        batch_size: int,
+        current_page: int = None,
+        total_processed: int = None
     ) -> List[Dict[str, Any]]:
-        """Fetch a batch of data from the API."""
+        """Fetch a batch of data from the API with proper pagination handling."""
+        import time
+        
+        start_time = time.time()
+        
         try:
-            # Using synchronous requests for Lambda compatibility
-            # This provides reliable data fetching without async complexity
-            
             endpoint = table_config['endpoint']
             service_name = table_config.get('service_name', 'unknown')
             
@@ -317,10 +524,10 @@ class ChunkProcessor:
             # Build API URL
             url = f"{api_base_url.rstrip('/')}/{endpoint.lstrip('/')}"
             
-            # Calculate page number (most APIs use 1-based pagination)
-            page_number = (offset // batch_size) + 1
+            # Use the provided batch_size (which may be adjusted for record limits)
+            effective_page_size = batch_size
             
-            # Build headers - start with common headers
+            # Build headers
             headers = {
                 'Content-Type': 'application/json'
             }
@@ -334,32 +541,45 @@ class ChunkProcessor:
             if hasattr(credentials, 'client_id') and credentials.client_id:
                 headers['ClientId'] = credentials.client_id
             
-            # Build parameters - use service-agnostic parameter names
-            params = {
-                'page': page_number,
-                'pageSize': batch_size,
-                'orderBy': 'id asc'
-            }
-            
-            # Handle service-specific parameter variations
-            if service_name.lower() == 'salesforce':
-                # Salesforce uses different parameter names
+            # Handle service-specific pagination
+            if service_name.lower() == 'connectwise':
+                # ConnectWise uses page-based pagination (1-indexed)
+                page_number = (offset // effective_page_size) + 1
                 params = {
-                    'limit': batch_size,
+                    'page': page_number,
+                    'pageSize': effective_page_size,
+                    'orderBy': table_config.get('order_by', 'id asc')
+                }
+                
+                # Add incremental sync conditions if configured
+                incremental_field = table_config.get('incremental_field')
+                if incremental_field:
+                    # This would be implemented based on last_updated timestamp
+                    # For now, we'll fetch all records during backfill
+                    pass
+                    
+            elif service_name.lower() == 'salesforce':
+                # Salesforce uses offset-based pagination
+                params = {
+                    'limit': effective_page_size,
                     'offset': offset
                 }
             elif service_name.lower() == 'servicenow':
-                # ServiceNow uses different parameter names
+                # ServiceNow uses offset-based pagination
                 params = {
-                    'sysparm_limit': batch_size,
+                    'sysparm_limit': effective_page_size,
                     'sysparm_offset': offset,
                     'sysparm_order_by': 'sys_id'
                 }
+            else:
+                # Default to page-based pagination
+                page_number = (offset // effective_page_size) + 1
+                params = {
+                    'page': page_number,
+                    'pageSize': effective_page_size,
+                    'orderBy': 'id asc'
+                }
             
-            # Add incremental sync conditions if needed
-            # This would be implemented based on the last_updated timestamp
-            
-            # Make API request using urllib
             # Build URL with parameters
             if params:
                 url_params = urllib.parse.urlencode(params)
@@ -367,24 +587,74 @@ class ChunkProcessor:
             else:
                 full_url = url
             
+            # CRITICAL API DEBUG: Log the actual request being made
+            self.logger.info(f"🌐 API REQUEST DEBUG",
+                           full_url=full_url,
+                           headers_count=len(headers),
+                           auth_header_present=bool(headers.get('Authorization')),
+                           service_name=service_name,
+                           endpoint=endpoint,
+                           params=params if 'params' in locals() else {},
+                           effective_page_size=effective_page_size,
+                           offset=offset)
+            
             # Create request with headers
             request = urllib.request.Request(full_url, headers=headers)
             
             # Make the request
             with urllib.request.urlopen(request, timeout=30) as response:
+                # Get response headers for pagination metadata
+                response_headers = dict(response.headers)
                 response_data = response.read().decode('utf-8')
+                
+                # CRITICAL API DEBUG: Log raw response details
+                self.logger.info(f"🌐 API RESPONSE DEBUG",
+                               status_code=response.getcode(),
+                               response_size_bytes=len(response_data),
+                               response_headers_count=len(response_headers),
+                               content_type=response_headers.get('content-type', 'unknown'),
+                               response_preview=response_data[:500] if response_data else 'empty')
+                
+                # Parse JSON and measure time
+                json_parse_start = time.time()
                 data = json.loads(response_data)
+                json_parse_time = time.time() - json_parse_start
             
             # Handle different response formats
             if isinstance(data, list):
-                return data
+                records = data
             elif isinstance(data, dict) and 'data' in data:
-                return data['data']
+                records = data['data']
             else:
-                return []
+                records = []
+            
+            # CRITICAL API DEBUG: Log data structure and record count
+            self.logger.info(f"🌐 API DATA DEBUG",
+                           data_type=type(data).__name__,
+                           is_list=isinstance(data, list),
+                           is_dict=isinstance(data, dict),
+                           dict_keys=list(data.keys()) if isinstance(data, dict) else None,
+                           records_count=len(records),
+                           first_record_keys=list(records[0].keys()) if records else None,
+                           json_parse_time=json_parse_time)
+            
+            # Log the full API call time
+            api_call_time = time.time() - start_time
+            self.logger.info(f"🌐 API TIMING DEBUG",
+                           total_api_call_time=api_call_time,
+                           json_parse_time=json_parse_time,
+                           network_time=api_call_time - json_parse_time,
+                           records_returned=len(records))
+            
+            return records
                 
         except urllib.error.HTTPError as e:
-            self.logger.error(f"HTTP error fetching data batch: {e.code} - {str(e)}")
+            error_msg = f"HTTP {e.code} error fetching data batch"
+            try:
+                error_body = e.read().decode('utf-8')
+                self.logger.error(f"{error_msg}: {error_body}")
+            except:
+                self.logger.error(f"{error_msg}: {str(e)}")
             return []
         except urllib.error.URLError as e:
             self.logger.error(f"URL error fetching data batch: {str(e)}")
@@ -393,15 +663,21 @@ class ChunkProcessor:
             self.logger.error(f"Failed to fetch data batch: {str(e)}")
             return []
     
-    def _write_to_s3(
+    def _write_batch_to_s3(
         self,
         records: List[Dict[str, Any]],
         chunk_config: Dict[str, Any],
         table_config: Dict[str, Any],
-        tenant_config: Dict[str, Any]
-    ):
-        """Write processed records to S3."""
+        tenant_config: Dict[str, Any],
+        batch_number: int
+    ) -> Optional[str]:
+        """Write a batch of records to S3 with memory-efficient processing."""
         try:
+            import pandas as pd
+            import pyarrow as pa
+            import pyarrow.parquet as pq
+            from io import BytesIO
+            
             tenant_id = tenant_config['tenant_id']
             # Use configured table_name from table_config, not derived from endpoint
             table_name = table_config['table_name']
@@ -411,32 +687,121 @@ class ChunkProcessor:
             timestamp = get_timestamp()
             s3_key = get_s3_key(tenant_id, 'raw', service_name, table_name, timestamp)
             
-            # Add chunk identifier to the key
+            # Add chunk and batch identifiers to ensure unique files
             chunk_id = chunk_config['chunk_id']
-            s3_key = s3_key.replace('.parquet', f'_{chunk_id}.json')
+            s3_key = s3_key.replace('.parquet', f'_{chunk_id}_batch{batch_number:03d}.parquet')
             
-            # Convert records to JSON
-            json_data = json.dumps(records, indent=2, default=str)
+            # Convert records to DataFrame and then to Parquet
+            df = pd.DataFrame(records)
+            
+            # Convert DataFrame to Parquet in memory
+            parquet_buffer = BytesIO()
+            df.to_parquet(parquet_buffer, engine='pyarrow', index=False)
+            parquet_data = parquet_buffer.getvalue()
             
             # Upload to S3
             self.s3_client.put_object(
                 Bucket=self.config.bucket_name,
                 Key=s3_key,
-                Body=json_data.encode('utf-8'),
-                ContentType='application/json'
+                Body=parquet_data,
+                ContentType='application/octet-stream'
             )
             
             self.logger.info(
-                f"Wrote {len(records)} records to S3",
+                f"Wrote batch {batch_number} with {len(records)} records to S3 as Parquet",
+                s3_key=s3_key,
+                record_count=len(records),
+                batch_number=batch_number,
+                table_name=table_name,
+                service_name=service_name
+            )
+            
+            # Clear memory immediately after write
+            del df, parquet_buffer, parquet_data
+            
+            # Note: Canonical transformation now triggered by result aggregator after all chunks complete
+            # This eliminates race conditions and duplicate processing
+            self.logger.info(
+                f"S3 write completed for {table_name} batch {batch_number}",
+                table_name=table_name,
+                service_name=service_name,
+                batch_number=batch_number,
+                s3_key=s3_key
+            )
+            
+            return s3_key
+            
+        except Exception as e:
+            self.logger.error(f"Failed to write batch {batch_number} to S3: {str(e)}")
+            return None
+
+    def _write_to_s3(
+        self,
+        records: List[Dict[str, Any]],
+        chunk_config: Dict[str, Any],
+        table_config: Dict[str, Any],
+        tenant_config: Dict[str, Any]
+    ):
+        """Write processed records to S3 (legacy method - kept for compatibility)."""
+        try:
+            import pandas as pd
+            import pyarrow as pa
+            import pyarrow.parquet as pq
+            from io import BytesIO
+            
+            tenant_id = tenant_config['tenant_id']
+            # Use configured table_name from table_config, not derived from endpoint
+            table_name = table_config['table_name']
+            service_name = table_config['service_name']
+            
+            # Generate S3 key using configured table name
+            timestamp = get_timestamp()
+            s3_key = get_s3_key(tenant_id, 'raw', service_name, table_name, timestamp)
+            
+            # Add chunk identifier to the key (keep the naming convention but use parquet)
+            chunk_id = chunk_config['chunk_id']
+            s3_key = s3_key.replace('.parquet', f'_{chunk_id}.parquet')
+            
+            # Convert records to DataFrame and then to Parquet
+            df = pd.DataFrame(records)
+            
+            # Convert DataFrame to Parquet in memory
+            parquet_buffer = BytesIO()
+            df.to_parquet(parquet_buffer, engine='pyarrow', index=False)
+            parquet_data = parquet_buffer.getvalue()
+            
+            # Upload to S3
+            self.s3_client.put_object(
+                Bucket=self.config.bucket_name,
+                Key=s3_key,
+                Body=parquet_data,
+                ContentType='application/octet-stream'
+            )
+            
+            self.logger.info(
+                f"Wrote {len(records)} records to S3 as Parquet",
                 s3_key=s3_key,
                 record_count=len(records),
                 table_name=table_name,
                 service_name=service_name
             )
             
+            # Note: Canonical transformation now triggered by result aggregator after all chunks complete
+            # This eliminates race conditions and duplicate processing
+            self.logger.info(
+                f"S3 write completed for {table_name}",
+                table_name=table_name,
+                service_name=service_name,
+                s3_key=s3_key
+            )
+            
         except Exception as e:
             self.logger.error(f"Failed to write to S3: {str(e)}")
             raise
+    
+    # Note: _get_canonical_table_name method removed - functionality moved to result aggregator
+    
+    # Note: _trigger_canonical_transformation method removed - functionality moved to result aggregator
     
     def _update_chunk_progress(
         self, 
