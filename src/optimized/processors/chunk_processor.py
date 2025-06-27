@@ -305,7 +305,7 @@ class ChunkProcessor:
             configured_page_size = table_config.get('page_size', 1000)
             
             # Memory optimization: Write to S3 every N batches to avoid memory accumulation
-            write_batch_size = 50  # Write to S3 every 5 API batches (20000 records max in memory)
+            write_batch_size = 50  # Write to S3 every 50 API batches
             batch_buffer = []
             batch_count = 0
             file_batch_number = 0  # Cumulative file counter (never resets)
@@ -395,10 +395,13 @@ class ChunkProcessor:
                     
                 self.logger.info(f"Processed batch: {len(batch_records)} records", **progress_info)
                 
-                # Write to S3 when buffer reaches write_batch_size (5000 records)
+                # CRITICAL FIX: Write to S3 when buffer reaches write_batch_size batches
                 should_write = batch_count >= write_batch_size
                 
+                self.logger.info(f"🔍 BATCH WRITE CHECK: batch_count={batch_count}, write_batch_size={write_batch_size}, should_write={should_write}, buffer_size={len(batch_buffer)}")
+                
                 if should_write and batch_buffer:
+                    self.logger.info(f"📝 WRITING BATCH TO S3: file_batch_number will be={file_batch_number + 1}, buffer_size={len(batch_buffer)}")
                     file_batch_number += 1  # Increment file counter
                     s3_key = self._write_batch_to_s3(
                         batch_buffer,
