@@ -1,0 +1,33 @@
+{
+  "timestamp": "2025-07-01T20:14:36.263077",
+  "mode": "full",
+  "clickhouse": {
+    "status": "FAILED",
+    "error": "Error when retrieving token from sso: Token has expired and refresh failed"
+  },
+  "api_server": {
+    "status": "FAILED",
+    "error": "HTTPConnectionPool(host='localhost', port=3001): Max retries exceeded with url: /health (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x11ac4ccb0>: Failed to establish a new connection: [Errno 61] Connection refused'))"
+  },
+  "frontend_server": {
+    "status": "FAILED",
+    "error": "HTTPConnectionPool(host='localhost', port=3000): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x11ac4f830>: Failed to establish a new connection: [Errno 61] Connection refused'))"
+  },
+  "data_pipeline": {
+    "status": "FAILED",
+    "error": "Error when retrieving token from sso: Token has expired and refresh failed"
+  },
+  "multi_tenant": {
+    "status": "FAILED",
+    "error": "Error when retrieving token from sso: Token has expired and refresh failed"
+  },
+  "performance": {
+    "status": "SIMULATED",
+    "metrics": {
+      "query_performance": "SIMULATED",
+      "data_quality": "SIMULATED",
+      "application_responsiveness": "SIMULATED"
+    }
+  },
+  "overall_status": "FAILED"
+}

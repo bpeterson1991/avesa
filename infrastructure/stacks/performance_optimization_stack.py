@@ -609,8 +609,8 @@ class PerformanceOptimizationStack(Stack):
                     )
                 ),
                 role=self.lambda_execution_role,
-                memory_size=1024,
-                timeout=Duration.seconds(180),
+                memory_size=1024,  # Keep at 1GB - should be sufficient
+                timeout=Duration.seconds(300),  # 5 minutes timeout
                 environment=canonical_env,
                 layers=[aws_pandas_layer, clickhouse_layer]
             )

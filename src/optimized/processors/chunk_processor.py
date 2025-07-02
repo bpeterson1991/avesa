@@ -3,10 +3,13 @@ Chunk Processor Lambda Function
 
 Handles processing of individual data chunks with optimized API calls,
 timeout handling, and progress tracking.
+
+Updated: 2025-07-01 20:36 - Fixed batch_records initialization issue
 """
 
 import json
 import time
+import gc
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -86,6 +89,47 @@ class TimeoutHandler:
 
 class ChunkProcessor:
     """Processes individual data chunks with optimized API calls."""
+    
+    def _check_memory_usage(self, max_memory_mb: int = 400) -> bool:
+        """
+        Check current memory usage and trigger cleanup if needed.
+        
+        Args:
+            max_memory_mb: Maximum memory usage in MB before triggering cleanup (default: 450MB = ~44% of 1024MB Lambda limit)
+            
+        Returns:
+            True if memory cleanup was triggered, False otherwise
+        """
+        try:
+            import psutil
+            process = psutil.Process()
+            memory_mb = process.memory_info().rss / 1024 / 1024
+            memory_percent = (memory_mb / 1024) * 100  # Percentage of Lambda's 1024MB limit
+            
+            self.logger.info(f"Memory usage: {memory_mb:.1f}MB ({memory_percent:.1f}% of Lambda limit)")
+            
+            if memory_mb > max_memory_mb:
+                self.logger.warning(f"HIGH MEMORY USAGE: {memory_mb:.1f}MB ({memory_percent:.1f}%), triggering aggressive cleanup")
+                
+                # Force aggressive garbage collection
+                gc.collect()
+                gc.collect()  # Double collection for better cleanup
+                gc.collect()  # Triple collection for maximum cleanup
+                
+                # Check memory after cleanup
+                memory_after = process.memory_info().rss / 1024 / 1024
+                memory_freed = memory_mb - memory_after
+                self.logger.info(f"Memory cleanup freed {memory_freed:.1f}MB, new usage: {memory_after:.1f}MB")
+                
+                return True
+            return False
+        except ImportError:
+            # psutil not available, skip memory monitoring
+            self.logger.warning("psutil not available - memory monitoring disabled")
+            return False
+        except Exception as e:
+            self.logger.warning(f"Failed to check memory usage: {e}")
+            return False
     
     def __init__(self):
         self.config = Config.from_environment()
@@ -261,16 +305,29 @@ class ChunkProcessor:
             progress_item = {
                 'job_id': {'S': job_id},
                 'chunk_id': {'S': chunk_id},
-                'tenant_id': {'S': chunk_config['tenant_id']},
-                'table_name': {'S': chunk_config['table_name']},
+                'tenant_id': {'S': chunk_config.get('tenant_id', 'unknown')},
+                'table_name': {'S': chunk_config.get('table_name', 'unknown')},
                 'status': {'S': 'processing'},
-                'start_offset': {'N': str(chunk_config['start_offset'])},
-                'end_offset': {'N': str(chunk_config['end_offset'])},
-                'estimated_records': {'N': str(chunk_config['estimated_records'])},
                 'records_processed': {'N': '0'},
                 'created_at': {'S': get_timestamp()},
                 'updated_at': {'S': get_timestamp()}
             }
+            
+            # Add optional numeric fields only if they are not None
+            if chunk_config.get('start_offset') is not None:
+                progress_item['start_offset'] = {'N': str(chunk_config['start_offset'])}
+            else:
+                progress_item['start_offset'] = {'N': '0'}
+                
+            if chunk_config.get('end_offset') is not None:
+                progress_item['end_offset'] = {'N': str(chunk_config['end_offset'])}
+            else:
+                progress_item['end_offset'] = {'N': '0'}
+                
+            if chunk_config.get('estimated_records') is not None:
+                progress_item['estimated_records'] = {'N': str(chunk_config['estimated_records'])}
+            else:
+                progress_item['estimated_records'] = {'N': '0'}
             
             self.dynamodb.put_item(
                 TableName=self.chunk_progress_table,
@@ -305,7 +362,7 @@ class ChunkProcessor:
             configured_page_size = table_config.get('page_size', 1000)
             
             # Memory optimization: Write to S3 every N batches to avoid memory accumulation
-            write_batch_size = 50  # Write to S3 every 50 API batches
+            write_batch_size = 25  # Reduced from 40 to 25 API batches for better memory management
             batch_buffer = []
             batch_count = 0
             file_batch_number = 0  # Cumulative file counter (never resets)
@@ -345,13 +402,23 @@ class ChunkProcessor:
                         break
                     effective_batch_size = min(configured_page_size, remaining_records)
                 
+                # Initialize batch_records to empty list to prevent UnboundLocalError
+                batch_records = []
+                
                 # Fetch batch of data using adjusted batch size
-                batch_records = self._fetch_data_batch(
-                    table_config,
-                    service_credentials,
-                    current_offset,
-                    effective_batch_size
-                )
+                try:
+                    batch_records = self._fetch_data_batch(
+                        table_config,
+                        service_credentials,
+                        current_offset,
+                        effective_batch_size
+                    )
+                except Exception as fetch_error:
+                    self.logger.error(f"Failed to fetch data batch: {str(fetch_error)}",
+                                    error_type=type(fetch_error).__name__,
+                                    offset=current_offset,
+                                    batch_size=effective_batch_size)
+                    # batch_records remains empty list, so the loop will break naturally
                 
                 # If no records returned, we've reached the end
                 if not batch_records:
@@ -365,23 +432,53 @@ class ChunkProcessor:
                     )
                     break
                 
+                # MEMORY OPTIMIZATION: Pre-allocation check before extending buffer
+                if batch_records:
+                    # Check memory BEFORE adding to buffer
+                    memory_cleanup_triggered = self._check_memory_usage(max_memory_mb=400)  # Reduced from 700MB to 400MB
+                    
+                    if memory_cleanup_triggered:
+                        self.logger.info("Memory cleanup triggered before buffer extend - checking if emergency write needed")
+                        # If we're near memory limit, write current buffer immediately
+                        if batch_buffer and len(batch_buffer) > 1000:  # Emergency threshold
+                            self.logger.warning(f"EMERGENCY WRITE: Writing {len(batch_buffer)} records due to memory pressure")
+                            file_batch_number += 1
+                            s3_key = self._write_batch_to_s3(
+                                batch_buffer,
+                                chunk_config,
+                                table_config,
+                                tenant_config,
+                                file_batch_number
+                            )
+                            if s3_key:
+                                s3_files_written.append(s3_key)
+                            
+                            # Clear buffer and reset
+                            del batch_buffer[:]  # More aggressive than clear()
+                            batch_count = 0
+                            gc.collect()
+                
                 # Add records to current batch buffer
                 batch_buffer.extend(batch_records)
                 records_processed += len(batch_records)
                 batch_count += 1
                 
-                # Update offset for next iteration
-                if service_name.lower() == 'connectwise':
-                    # ConnectWise uses page-based pagination
-                    current_page += 1
-                    current_offset = (current_page - 1) * configured_page_size
-                else:
-                    # Other services may use offset-based pagination
-                    current_offset += len(batch_records)
+                # Store batch_records length before cleanup for pagination
+                batch_records_len = len(batch_records)
+                
+                # Update offset for next iteration only if we have records
+                if batch_records_len > 0:
+                    if service_name.lower() == 'connectwise':
+                        # ConnectWise uses page-based pagination
+                        current_page += 1
+                        current_offset = (current_page - 1) * configured_page_size
+                    else:
+                        # Other services may use offset-based pagination
+                        current_offset += batch_records_len
                 
                 # Log progress with record limit status
                 progress_info = {
-                    "batch_size": len(batch_records),
+                    "batch_size": batch_records_len,
                     "current_page": current_page,
                     "current_offset": current_offset,
                     "total_processed": records_processed,
@@ -393,7 +490,12 @@ class ChunkProcessor:
                     progress_info["record_limit"] = record_limit
                     progress_info["remaining"] = record_limit - records_processed
                     
-                self.logger.info(f"Processed batch: {len(batch_records)} records", **progress_info)
+                self.logger.info(f"Processed batch: {batch_records_len} records", **progress_info)
+                
+                # Aggressive cleanup of batch_records after all operations
+                if 'batch_records' in locals() and batch_records:
+                    del batch_records
+                gc.collect()
                 
                 # CRITICAL FIX: Write to S3 when buffer reaches write_batch_size batches
                 should_write = batch_count >= write_batch_size
@@ -420,12 +522,18 @@ class ChunkProcessor:
                         s3_files_count=len(s3_files_written)
                     )
                     
-                    # Clear buffer to free memory
-                    batch_buffer.clear()
+                    # Aggressive cleanup to free memory
+                    del batch_buffer[:]  # More aggressive than clear()
                     batch_count = 0
+                    gc.collect()  # Force garbage collection after clearing
+                    gc.collect()  # Double collect for aggressive cleanup
+                    
+                    # Check memory after cleanup
+                    self._check_memory_usage(max_memory_mb=400)
                 
                 # Only stop if we get zero records - partial pages may still have more data
-                if len(batch_records) == 0:
+                # Note: batch_records_len is already captured above before cleanup
+                if batch_records_len == 0:
                     self.logger.info(
                         f"No more records returned from API, reached end of data",
                         current_page=current_page,
@@ -434,16 +542,16 @@ class ChunkProcessor:
                     break
                 
                 # Log when we get partial pages but continue processing
-                if len(batch_records) < configured_page_size:
+                if batch_records_len < configured_page_size:
                     self.logger.info(
                         f"Received partial page but continuing (API may have more data)",
-                        received=len(batch_records),
+                        received=batch_records_len,
                         page_size=configured_page_size,
                         current_page=current_page,
                         total_processed=records_processed
                     )
             
-            # Write any remaining records in buffer
+            # MEMORY OPTIMIZATION: Write any remaining records in buffer
             if batch_buffer:
                 file_batch_number += 1  # Fix: Increment for final batch
                 s3_key = self._write_batch_to_s3(
@@ -457,11 +565,22 @@ class ChunkProcessor:
                     s3_files_written.append(s3_key)
                 
                 self.logger.info(
-                    f"Wrote final batch buffer to S3: {len(batch_buffer)} records",
+                    f"Wrote final batch buffer to S3: {len(batch_buffer)} remaining records",
                     buffer_size=len(batch_buffer),
                     total_processed=records_processed,
                     s3_files_count=len(s3_files_written)
                 )
+            else:
+                self.logger.info("No remaining records - all data written in intermediate batches")
+            
+            # Aggressive final cleanup
+            del batch_buffer
+            gc.collect()
+            gc.collect()  # Double collection for better cleanup
+            self.logger.info("Final memory cleanup completed")
+            
+            # Final memory check
+            self._check_memory_usage(max_memory_mb=400)
             
             processing_time = time.time() - start_time
             
@@ -612,16 +731,24 @@ class ChunkProcessor:
                 
                 # CRITICAL API DEBUG: Log raw response details
                 self.logger.info(f"🌐 API RESPONSE DEBUG",
-                               status_code=response.getcode(),
-                               response_size_bytes=len(response_data),
-                               response_headers_count=len(response_headers),
-                               content_type=response_headers.get('content-type', 'unknown'),
-                               response_preview=response_data[:500] if response_data else 'empty')
+                                status_code=response.getcode(),
+                                response_size_bytes=len(response_data),
+                                response_headers_count=len(response_headers),
+                                content_type=response_headers.get('content-type', 'unknown'),
+                                response_preview=response_data[:500] if response_data else 'empty')
+                
+                # MEMORY OPTIMIZATION: Check memory before JSON parsing
+                if len(response_data) > 10 * 1024 * 1024:  # If response > 10MB
+                    self.logger.warning(f"Large API response detected: {len(response_data) / 1024 / 1024:.1f}MB")
+                    self._check_memory_usage(max_memory_mb=400)
                 
                 # Parse JSON and measure time
                 json_parse_start = time.time()
                 data = json.loads(response_data)
                 json_parse_time = time.time() - json_parse_start
+                
+                # Immediately free response_data memory after parsing
+                del response_data
             
             # Handle different response formats
             if isinstance(data, list):
@@ -648,6 +775,12 @@ class ChunkProcessor:
                            json_parse_time=json_parse_time,
                            network_time=api_call_time - json_parse_time,
                            records_returned=len(records))
+            
+            # MEMORY OPTIMIZATION: Clean up parsed data structure if it's not records
+            if isinstance(data, dict) and 'data' in data:
+                # Free the wrapper dict memory
+                del data
+                gc.collect()
             
             return records
                 
@@ -719,8 +852,13 @@ class ChunkProcessor:
                 service_name=service_name
             )
             
-            # Clear memory immediately after write
-            del df, parquet_buffer, parquet_data
+            # Aggressive memory cleanup
+            del df
+            del parquet_buffer
+            del parquet_data
+            del records
+            gc.collect()
+            gc.collect()  # Double gc.collect() for better cleanup
             
             # Note: Canonical transformation now triggered by result aggregator after all chunks complete
             # This eliminates race conditions and duplicate processing
@@ -907,4 +1045,4 @@ class ChunkProcessor:
 def lambda_handler(event, context):
     """Lambda entry point."""
     processor = ChunkProcessor()
-    return processor.lambda_handler(event, context)
+    return processor.lambda_handler(event, context)# Force rebuild timestamp: Tue Jul  1 20:45:15 PDT 2025

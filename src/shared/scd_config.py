@@ -217,20 +217,17 @@ class SCDConfigManager:
         
         mapping = None
         
-        # Try to load from bundled file first
-        bundled_path = os.path.join(
-            os.path.dirname(__file__), '..', '..', 
-            'mappings', 'canonical', f'{table_name}.json'
-        )
-        if os.path.exists(bundled_path):
+        # PRIORITY 1: Try S3 first (production mapping files location)
+        if bucket and self.s3_client:
             try:
-                with open(bundled_path, 'r') as f:
-                    mapping = json.load(f)
-                logger.debug(f"Loaded SCD mapping from bundled file: {bundled_path}")
+                s3_key = f"mappings/canonical/{table_name}.json"
+                response = self.s3_client.get_object(Bucket=bucket, Key=s3_key)
+                mapping = json.loads(response['Body'].read().decode('utf-8'))
+                logger.debug(f"Loaded SCD mapping from S3: {bucket}/{s3_key}")
             except Exception as e:
-                logger.warning(f"Failed to load bundled SCD mapping: {e}")
+                logger.warning(f"Failed to load SCD mapping from S3: {e}")
         
-        # Try local development file
+        # PRIORITY 2: Try local development file (for local testing)
         if mapping is None:
             local_path = os.path.join('mappings', 'canonical', f'{table_name}.json')
             if os.path.exists(local_path):
@@ -241,17 +238,21 @@ class SCDConfigManager:
                 except Exception as e:
                     logger.warning(f"Failed to load local SCD mapping: {e}")
         
-        # Try S3 as fallback
-        if mapping is None and bucket and self.s3_client:
-            try:
-                s3_key = f"mappings/canonical/{table_name}.json"
-                response = self.s3_client.get_object(Bucket=bucket, Key=s3_key)
-                mapping = json.loads(response['Body'].read().decode('utf-8'))
-                logger.debug(f"Loaded SCD mapping from S3: {bucket}/{s3_key}")
-            except Exception as e:
-                logger.warning(f"Failed to load SCD mapping from S3: {e}")
+        # PRIORITY 3: Try bundled file as fallback
+        if mapping is None:
+            bundled_path = os.path.join(
+                os.path.dirname(__file__), '..', '..',
+                'mappings', 'canonical', f'{table_name}.json'
+            )
+            if os.path.exists(bundled_path):
+                try:
+                    with open(bundled_path, 'r') as f:
+                        mapping = json.load(f)
+                    logger.debug(f"Loaded SCD mapping from bundled file: {bundled_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to load bundled SCD mapping: {e}")
         
-        # Use default mapping as final fallback
+        # PRIORITY 4: Use default mapping as final fallback
         if mapping is None:
             mapping = self._get_default_scd_mapping(table_name)
             logger.info(f"Using default SCD mapping for {table_name}")

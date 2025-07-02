@@ -51,21 +51,35 @@ function loadCanonicalMapping(tableName) {
 function extractCanonicalFields(mapping) {
   if (!mapping) return [];
   
+  // If field_types are explicitly defined in the mapping, use those
+  // This ensures we only include fields that actually exist in the table
+  if (mapping.field_types) {
+    const fields = Object.keys(mapping.field_types);
+    
+    // Add SCD fields for Type 2 tables if not already included
+    if (mapping.scd_type === 'type_2') {
+      if (!fields.includes('effective_date')) fields.push('effective_date');
+      if (!fields.includes('expiration_date')) fields.push('expiration_date');
+      if (!fields.includes('is_current')) fields.push('is_current');
+    }
+    
+    // Always add tenant_id if not included
+    // These are required for multi-tenancy and data lineage
+    if (!fields.includes('tenant_id')) fields.push('tenant_id');
+    
+    return fields.sort();
+  }
+  
+  // Fallback to extracting from integration mappings if field_types not defined
   const fieldSet = new Set();
   
-  // Standard audit fields that should always be included
-  const standardFields = [
-    'id', 'tenant_id', 'source_system', 'source_id',
-    'last_updated', 'last_updated_by', 'created_date',
-    'data_hash', 'record_version'
-  ];
-  
-  // Add standard fields
+  // Minimal truly universal fields
+  const standardFields = ['id', 'tenant_id'];
   standardFields.forEach(field => fieldSet.add(field));
   
   // Extract fields from all integration mappings
   Object.keys(mapping).forEach(integrationKey => {
-    if (integrationKey === 'scd_type') return; // Skip metadata
+    if (integrationKey === 'scd_type' || integrationKey === 'field_types') return; // Skip metadata
     
     const integration = mapping[integrationKey];
     if (typeof integration === 'object') {
@@ -284,7 +298,17 @@ function transformResults(results, tableName) {
       
       // Handle date fields
       if (key.endsWith('_date') || key.includes('date')) {
-        transformed[key] = value ? new Date(value).toISOString() : null;
+        if (value) {
+          const date = new Date(value);
+          // Check if the date is valid
+          if (!isNaN(date.getTime())) {
+            transformed[key] = date.toISOString();
+          } else {
+            transformed[key] = null;
+          }
+        } else {
+          transformed[key] = null;
+        }
         continue;
       }
       

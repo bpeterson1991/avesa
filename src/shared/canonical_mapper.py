@@ -15,6 +15,7 @@ import hashlib
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
+from collections import OrderedDict
 
 try:
     from .aws_client_factory import AWSClientFactory
@@ -37,12 +38,13 @@ class CanonicalMapper:
     - Multiple Lambda functions using canonical mapping
     """
 
-    def __init__(self, s3_client=None):
+    def __init__(self, s3_client=None, max_cache_size=10):
         """
         Initialize the canonical mapper.
         
         Args:
             s3_client: Optional S3 client for loading mappings from S3
+            max_cache_size: Maximum number of mappings to cache (prevents memory leaks)
         """
         if s3_client is None:
             # Create S3 client using shared factory
@@ -52,8 +54,9 @@ class CanonicalMapper:
         else:
             self.s3_client = s3_client
         
-        # Cache for loaded mappings
-        self._mapping_cache = {}
+        # MEMORY OPTIMIZATION: Bounded cache with LRU eviction
+        self.max_cache_size = max_cache_size
+        self._mapping_cache = OrderedDict()
 
 # REMOVED: get_default_mapping function - redundant since we have actual mapping files
 # This eliminates hardcoded fallback data that could drift from real JSON files
@@ -76,17 +79,17 @@ class CanonicalMapper:
         
         mapping = None
         
-        # Try to load from bundled file first
-        bundled_path = os.path.join(os.path.dirname(__file__), '..', '..', 'mappings', 'canonical', f'{table_type}.json')
-        if os.path.exists(bundled_path):
+        # PRIORITY 1: Try S3 first (production mapping files location)
+        if bucket and self.s3_client:
             try:
-                with open(bundled_path, 'r') as f:
-                    mapping = json.load(f)
-                logger.debug(f"Loaded mapping from bundled file: {bundled_path}")
+                s3_key = f"mappings/canonical/{table_type}.json"
+                response = self.s3_client.get_object(Bucket=bucket, Key=s3_key)
+                mapping = json.loads(response['Body'].read().decode('utf-8'))
+                logger.debug(f"Loaded mapping from S3: {bucket}/{s3_key}")
             except Exception as e:
-                logger.warning(f"Failed to load bundled mapping: {e}")
+                logger.warning(f"Failed to load mapping from S3: {e}")
         
-        # Try local development file
+        # PRIORITY 2: Try local development file (for local testing)
         if mapping is None:
             local_path = os.path.join('mappings', 'canonical', f'{table_type}.json')
             if os.path.exists(local_path):
@@ -97,24 +100,43 @@ class CanonicalMapper:
                 except Exception as e:
                     logger.warning(f"Failed to load local mapping: {e}")
         
-        # Try S3 as fallback
-        if mapping is None and bucket and self.s3_client:
-            try:
-                s3_key = f"mappings/canonical/{table_type}.json"
-                response = self.s3_client.get_object(Bucket=bucket, Key=s3_key)
-                mapping = json.loads(response['Body'].read().decode('utf-8'))
-                logger.debug(f"Loaded mapping from S3: {bucket}/{s3_key}")
-            except Exception as e:
-                logger.warning(f"Failed to load mapping from S3: {e}")
+        # PRIORITY 3: Try bundled file as final fallback
+        if mapping is None:
+            bundled_path = os.path.join(os.path.dirname(__file__), '..', '..', 'mappings', 'canonical', f'{table_type}.json')
+            if os.path.exists(bundled_path):
+                try:
+                    with open(bundled_path, 'r') as f:
+                        mapping = json.load(f)
+                    logger.debug(f"Loaded mapping from bundled file: {bundled_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to load bundled mapping: {e}")
         
         # If no mapping found, raise an error - we should always have mapping files
         if mapping is None:
             raise FileNotFoundError(f"No mapping file found for table type '{table_type}'. "
-                                  f"Expected file: mappings/canonical/{table_type}.json")
+                                  f"Expected S3 location: {bucket or 'BUCKET_NAME'}/mappings/canonical/{table_type}.json")
         
-        # Cache the result
-        self._mapping_cache[cache_key] = mapping
+        # MEMORY OPTIMIZATION: Cache the result with size management
+        self._manage_cache(cache_key, mapping)
         return mapping
+    
+    def _manage_cache(self, key: str, value: Dict[str, Any]) -> None:
+        """
+        Manage cache size to prevent memory leaks.
+        
+        Args:
+            key: Cache key
+            value: Value to cache
+        """
+        # Remove oldest items if cache is full
+        while len(self._mapping_cache) >= self.max_cache_size:
+            oldest_key = next(iter(self._mapping_cache))
+            removed = self._mapping_cache.pop(oldest_key)
+            logger.debug(f"Evicted mapping from cache: {oldest_key}")
+        
+        # Add/update the item (moves to end if exists)
+        self._mapping_cache[key] = value
+        self._mapping_cache.move_to_end(key)
 
     def _get_nested_value(self, data: Dict[str, Any], field_path: str) -> Any:
         """
