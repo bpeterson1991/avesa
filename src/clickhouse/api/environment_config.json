@@ -1,0 +1,65 @@
+{
+  "development": {
+    "lambda": {
+      "memorySize": 512,
+      "timeout": 30,
+      "cors": {
+        "origins": ["http://localhost:3000", "https://dev.yourdomain.com"]
+      },
+      "logging": {
+        "level": "debug"
+      }
+    },
+    "ec2": {
+      "port": 3001,
+      "cors": {
+        "origins": ["http://localhost:3000", "https://dev.yourdomain.com"]
+      },
+      "logging": {
+        "level": "debug"
+      }
+    }
+  },
+  "staging": {
+    "lambda": {
+      "memorySize": 1024,
+      "timeout": 60,
+      "cors": {
+        "origins": ["https://staging.yourdomain.com"]
+      },
+      "logging": {
+        "level": "info"
+      }
+    },
+    "ec2": {
+      "port": 3001,
+      "cors": {
+        "origins": ["https://staging.yourdomain.com"]
+      },
+      "logging": {
+        "level": "info"
+      }
+    }
+  },
+  "production": {
+    "lambda": {
+      "memorySize": 2048,
+      "timeout": 300,
+      "cors": {
+        "origins": ["https://yourdomain.com"]
+      },
+      "logging": {
+        "level": "warn"
+      }
+    },
+    "ec2": {
+      "port": 3001,
+      "cors": {
+        "origins": ["https://yourdomain.com"]
+      },
+      "logging": {
+        "level": "warn"
+      }
+    }
+  }
+}

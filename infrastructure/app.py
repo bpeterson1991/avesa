@@ -11,6 +11,8 @@ import boto3
 from aws_cdk import App, Environment
 from stacks.performance_optimization_stack import PerformanceOptimizationStack
 from stacks.clickhouse_stack import ClickHouseStack
+from stacks.web_application_stack import WebApplicationStack
+from stacks.frontend_stack import FrontendStack
 from monitoring.data_quality_pipeline_monitoring import DataQualityPipelineMonitoringStack
 
 app = App()
@@ -124,6 +126,21 @@ clickhouse_stack = ClickHouseStack(
     last_updated_table_name=f"LastUpdated{env_config['table_suffix']}"
 )
 
+# Deploy web application stack for serverless API
+web_app_stack = WebApplicationStack(
+    app,
+    f"AVESAWebApplication{env_config['table_suffix']}",
+    env=env
+)
+
+# Deploy frontend stack for React application
+frontend_stack = FrontendStack(
+    app,
+    f"AVESAFrontend{env_config['table_suffix']}",
+    env=env,
+    api_url="https://wesjtc1uve.execute-api.us-east-2.amazonaws.com/dev"
+)
+
 # Deploy comprehensive data quality pipeline monitoring stack
 monitoring_stack = DataQualityPipelineMonitoringStack(
     app,
@@ -133,7 +150,7 @@ monitoring_stack = DataQualityPipelineMonitoringStack(
 
 # CONSOLIDATED INFRASTRUCTURE ARCHITECTURE:
 #
-# ACTIVE STACKS (4):
+# ACTIVE STACKS (6):
 # 1. PerformanceOptimizationStack - Consolidated core data pipeline including:
 #    - DynamoDB tables (TenantServices, LastUpdated, ProcessingJobs, ChunkProgress)
 #    - S3 data bucket with lifecycle management
@@ -141,13 +158,27 @@ monitoring_stack = DataQualityPipelineMonitoringStack(
 #    - Lambda functions for data ingestion and transformation
 #    - IAM roles and policies for secure access
 #
-# 3. ClickHouseStack - Multi-tenant analytics database and API layer:
+# 2. ClickHouseStack - Multi-tenant analytics database and API layer:
 #    - ClickHouse Cloud integration for real-time analytics
 #    - Multi-tenant data isolation and security
 #    - REST API for data access and querying
 #    - Schema management and migration tools
 #
-# 4. DataQualityPipelineMonitoringStack - Comprehensive pipeline monitoring:
+# 3. WebApplicationStack - Serverless Express API for ClickHouse:
+#    - Lambda function with serverless-express wrapper
+#    - API Gateway REST API with CORS and throttling
+#    - VPC integration with existing ClickHouse infrastructure
+#    - Environment-aware configuration and monitoring
+#    - Secrets Manager integration for secure credentials
+#
+# 4. FrontendStack - React frontend application deployment:
+#    - S3 bucket for static website hosting with proper security
+#    - CloudFront distribution for global CDN with SPA routing support
+#    - Environment-specific configuration and API integration
+#    - Automated deployment pipeline with cache invalidation
+#    - SSL/HTTPS enforcement and custom domain support (optional)
+#
+# 5. DataQualityPipelineMonitoringStack - Comprehensive pipeline monitoring:
 #    - End-to-end pipeline monitoring (Ingestion → Transformation → Loading → Validation)
 #    - CloudWatch dashboards for all canonical tables (companies, contacts, tickets, time_entries)
 #    - Stage-specific quality metrics and health scores
@@ -163,11 +194,13 @@ monitoring_stack = DataQualityPipelineMonitoringStack(
 # ARCHIVED STACKS (moved to infrastructure/stacks/archive/):
 # - CrossAccountMonitoringStack - Future multi-account deployment monitoring
 #
-# This consolidated four-stack architecture provides:
+# This consolidated six-stack architecture provides:
 # - Unified resource management with reduced complexity
 # - Scalable data ingestion and transformation
 # - Historical data processing capabilities
 # - Real-time analytics and multi-tenant data access
+# - Serverless API layer with automatic scaling and cost optimization
+# - Global React frontend deployment with CloudFront CDN optimization
 # - Comprehensive data quality monitoring and alerting
 # - Simplified deployment and maintenance
 

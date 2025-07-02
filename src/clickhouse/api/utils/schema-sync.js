@@ -25,11 +25,26 @@ function loadCanonicalMapping(tableName) {
   }
   
   try {
-    // Path from src/clickhouse/api/utils to project root, then to mappings
-    const mappingPath = path.join(__dirname, '..', '..', '..', '..', 'mappings', 'canonical', `${tableName}.json`);
+    // Try multiple paths to find the mapping file
+    // 1. Lambda environment: mappings are bundled at /var/task/mappings
+    // 2. Local development: relative path from utils directory
+    const possiblePaths = [
+      path.join('/var/task/mappings/canonical', `${tableName}.json`), // Lambda environment
+      path.join(__dirname, '..', 'mappings', 'canonical', `${tableName}.json`), // Bundled with API
+      path.join(__dirname, '..', '..', '..', '..', 'mappings', 'canonical', `${tableName}.json`) // Local dev
+    ];
     
-    if (!fs.existsSync(mappingPath)) {
-      logger.warn(`Canonical mapping file not found for table: ${tableName} at path: ${mappingPath}`);
+    let mappingPath = null;
+    
+    for (const tryPath of possiblePaths) {
+      if (fs.existsSync(tryPath)) {
+        mappingPath = tryPath;
+        break;
+      }
+    }
+    
+    if (!mappingPath) {
+      logger.warn(`Canonical mapping file not found for table: ${tableName}. Tried paths:`, possiblePaths);
       return null;
     }
     
@@ -139,11 +154,42 @@ function buildSelectClause(tableName, alias = '') {
 function getSCDType(tableName) {
   try {
     // Try to load canonical mapping file
-    const mappingPath = path.join(__dirname, '..', '..', '..', 'mappings', 'canonical', `${tableName}.json`);
+    // Try multiple paths to find the mapping file in Lambda and local environments
+    const possiblePaths = [
+      path.join('/var/task/mappings/canonical', `${tableName}.json`), // Lambda environment
+      path.join(__dirname, '..', 'mappings', 'canonical', `${tableName}.json`), // Bundled with API
+      path.join(__dirname, '..', '..', '..', 'mappings', 'canonical', `${tableName}.json`) // Local dev (original path)
+    ];
+    
+    let mappingPath = null;
+    
+    for (const tryPath of possiblePaths) {
+      if (fs.existsSync(tryPath)) {
+        mappingPath = tryPath;
+        break;
+      }
+    }
     
     if (fs.existsSync(mappingPath)) {
       const mapping = JSON.parse(fs.readFileSync(mappingPath, 'utf8'));
       return mapping.scd_type || 'type_1'; // Default to type_1 if not specified
+    }
+    
+    // Try alternate paths for Lambda environment
+    const alternatePaths = [
+      path.join('/var/task/mappings/canonical', `${tableName}.json`),
+      path.join(__dirname, '..', 'mappings', 'canonical', `${tableName}.json`)
+    ];
+    
+    for (const altPath of alternatePaths) {
+      if (fs.existsSync(altPath)) {
+        try {
+          const mapping = JSON.parse(fs.readFileSync(altPath, 'utf8'));
+          return mapping.scd_type || 'type_1';
+        } catch (e) {
+          logger.warn(`Failed to read mapping from alternate path ${altPath}: ${e.message}`);
+        }
+      }
     }
     
     // Fallback to default SCD types based on business requirements
