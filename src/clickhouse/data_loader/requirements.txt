@@ -10,6 +10,9 @@ certifi>=2023.7.22
 lz4>=3.1.0
 zstandard>=0.21.0
 
+# System monitoring - For memory diagnostics
+psutil>=5.9.8
+
 # Note: The following are provided by AWS Pandas Layer:
 # - boto3>=1.38.39
 # - botocore>=1.38.39

@@ -11,3 +11,6 @@ requests>=2.31.0
 # Data Processing Libraries - For data transformation
 pandas>=2.2.3
 pyarrow>=18.1.0
+
+# System monitoring - For memory diagnostics
+psutil>=5.9.8
