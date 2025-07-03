@@ -3,6 +3,7 @@ import {
   PaginatedResponse,
   AuthResponse,
   LoginCredentials,
+  User,
   Company,
   Contact,
   Ticket,
@@ -25,7 +26,7 @@ class ApiService {
 
   constructor() {
     this.client = axios.create({
-      baseURL: process.env.REACT_APP_API_URL || 'http://localhost:3001',
+      baseURL: process.env.REACT_APP_API_URL || 'http://localhost:3000',
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
@@ -100,6 +101,39 @@ class ApiService {
 
   // Authentication endpoints
   async login(credentials: LoginCredentials): Promise<AuthResponse> {
+    // Mock authentication for demo purposes
+    if (process.env.NODE_ENV === 'development') {
+      // Check for demo credentials
+      if (
+        credentials.email === 'admin@sitetechnology.com' &&
+        credentials.password === 'demo123' &&
+        credentials.tenantId === 'sitetechnology'
+      ) {
+        const mockUser: User = {
+          id: '1',
+          email: credentials.email,
+          tenantId: credentials.tenantId,
+          roles: ['admin'],
+          permissions: ['dashboard.view', 'widgets.edit'],
+          iat: Math.floor(Date.now() / 1000),
+          exp: Math.floor(Date.now() / 1000) + 3600 * 24 // 24 hours
+        };
+        const mockToken = 'mock-jwt-token-' + Date.now();
+        
+        this.setAuth(mockToken, credentials.tenantId);
+        localStorage.setItem('user', JSON.stringify(mockUser));
+        
+        return {
+          token: mockToken,
+          user: mockUser,
+          expiresIn: 3600 * 24 // 24 hours in seconds
+        };
+      } else {
+        throw new Error('Invalid credentials');
+      }
+    }
+    
+    // Normal API call for production
     const response = await this.client.post<AuthResponse>('/auth/login', credentials);
     const { token, user } = response.data;
     
@@ -254,6 +288,30 @@ class ApiService {
     const response = await this.client.request<T>(config);
     return response.data;
   }
+
+  // Analytics namespace
+  analytics = {
+    getDashboard: async (period?: string): Promise<DashboardSummary> => {
+      const response = await this.client.get<DashboardSummary>('/api/analytics/dashboard', {
+        params: period ? { period } : undefined
+      });
+      return response.data;
+    },
+
+    getTicketStatusDistribution: async (period?: string): Promise<{ statusDistribution: StatusDistribution[], period: string }> => {
+      const response = await this.client.get<{ statusDistribution: StatusDistribution[], period: string }>('/api/analytics/tickets/status', {
+        params: period ? { period } : undefined
+      });
+      return response.data;
+    },
+
+    getTopCompanies: async (metric?: string, limit?: number, period?: string): Promise<{ topCompanies: TopCompany[] }> => {
+      const response = await this.client.get<{ topCompanies: TopCompany[] }>('/api/analytics/companies/top', {
+        params: { metric, limit, period }
+      });
+      return response.data;
+    }
+  };
 }
 
 // Create singleton instance

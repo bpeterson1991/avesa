@@ -1,0 +1,49 @@
+.widget-grid .react-grid-layout {
+  position: relative;
+}
+
+.widget-grid.edit-mode .react-grid-item {
+  cursor: move;
+  transition: all 200ms ease;
+  transition-property: left, top;
+}
+
+.widget-grid.edit-mode .react-grid-item.react-grid-placeholder {
+  background: #3B82F6;
+  opacity: 0.2;
+  transition-duration: 100ms;
+  z-index: 2;
+  user-select: none;
+  border-radius: 0.5rem;
+}
+
+.widget-grid.edit-mode .react-resizable-handle {
+  background-image: none;
+  box-sizing: border-box;
+}
+
+.widget-grid.edit-mode .react-resizable-handle::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 5px;
+  height: 5px;
+  border-right: 2px solid rgba(0, 0, 0, 0.4);
+  border-bottom: 2px solid rgba(0, 0, 0, 0.4);
+}
+
+.widget-item {
+  height: 100%;
+}
+
+.widget-grid.edit-mode .react-grid-item.react-draggable-dragging {
+  transition: none;
+  z-index: 3;
+  opacity: 0.8;
+}
+
+.widget-grid.edit-mode .react-grid-item.resizing {
+  z-index: 1;
+  opacity: 0.9;
+}

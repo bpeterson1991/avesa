@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import Layout from './components/Layout';
+import AppLayout from './components/AppLayout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Companies from './pages/Companies';
@@ -66,7 +66,7 @@ function AppRoutes() {
         path="/"
         element={
           <ProtectedRoute>
-            <Layout />
+            <AppLayout />
           </ProtectedRoute>
         }
       >
